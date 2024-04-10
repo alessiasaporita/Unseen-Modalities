@@ -1,0 +1,8 @@
+.DS_Store
+*.pt
+.vscode/
+__pycache__/
+Output/
+*.sh
+pretrained_models/
+*.npy
