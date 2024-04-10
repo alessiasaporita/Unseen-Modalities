@@ -12,9 +12,9 @@ from pytorchvideo.transforms import (
 import torchvision.transforms as T
 from torchvision.transforms._transforms_video import NormalizeVideo
 from transforms import SpatialCrop, TemporalCrop
-from randomerasing import RandomErasing
-from rand_auto_aug import RandAugment
-from mmaction.datasets.pipelines import Compose
+#from randomerasing import RandomErasing
+#from rand_auto_aug import RandAugment
+#from mmaction.datasets.pipelines import Compose
 from PIL import Image
 
 def get_video_clip(num_frames, clip_len = 32, train_mode = False):
@@ -35,7 +35,7 @@ def get_video_clip(num_frames, clip_len = 32, train_mode = False):
         else:
             seq.append((start + end) // 2)
     
-    return np.array(seq)
+    return torch.tensor(seq) #np.array(seq)
 
 def get_verb_classes(annotation_path="epic-annotations/EPIC_100_verb_classes.csv"):
     verb_dict = {}
@@ -115,7 +115,7 @@ class EPICKitchensValidation(Dataset):
 
         csv_file_path = "epic-annotations/EPIC_100_full_val.csv"
 
-        self.sample_list = []
+        self.sample_list = [] #list of validation samples names
         with open(csv_file_path) as f:
             f_csv = csv.reader(f)
             for i, row in enumerate(f_csv):
@@ -141,7 +141,7 @@ class EPICKitchensValidation(Dataset):
                     continue
                 samples.append(row)
         f.close()
-        self.data = samples
+        self.data = samples #6215 samples
         self.noun_label_num = 300
         self.verb_label_num = 97
 
@@ -182,10 +182,10 @@ class EPICKitchensValidation(Dataset):
             dither=0.0,
             frame_shift=10,
         )
-        target_length = self.audio_conf.get("target_length")
+        target_length = self.audio_conf.get("target_length") #128
         n_frames = fbank.shape[0]
 
-        p = target_length - n_frames
+        p = target_length - n_frames 
 
         # cut and pad
         if p > 0:
@@ -195,16 +195,16 @@ class EPICKitchensValidation(Dataset):
             start_idx = np.random.randint(0, -p, (1,))[0]
             fbank = fbank[start_idx : start_idx + target_length, :]
 
-        return fbank, 0
+        return fbank
 
     def get_fbank(self, index):
         datum = self.data[index]
 
-        audio_path = os.path.join(self.audio_data_path, datum[1], datum[0] + ".wav")
+        audio_path = os.path.join(self.audio_data_path, datum[0] + ".wav") #os.path.join(self.audio_data_path, datum[1], datum[0] + ".wav")
         fbank = self._wav2fbank(audio_path)
 
         # normalize the input for both training and test
-        if not self.audio_skip_norm:
+        if not self.audio_skip_norm: #false
             fbank = (fbank - self.audio_norm_mean) / (self.audio_norm_std * 2)
         # skip normalization the input if you are trying to get the normalization stats.
         else:
@@ -248,10 +248,10 @@ class EPICKitchensValidation(Dataset):
         return action_label
 
     def __getitem__(self, index):
-        available_modalities = ["RGB", "Audio"]
+        available_modalities = ["RGB", "Audio"] 
         output_data = {"Audio": None, "RGB": None}
         if "Audio" in available_modalities:
-            output_data["Audio"] = self.get_fbank(index)
+            output_data["Audio"] = self.get_fbank(index) #(1, 128, 128)
             audio_mask = np.ones((self.num_position, 1))
         else:
             output_data["Audio"] = torch.rand(128, 128)
@@ -259,7 +259,7 @@ class EPICKitchensValidation(Dataset):
 
         # -------------------------------------------------- RGB -------------------------------------------
         if "RGB" in available_modalities:
-            output_data["RGB"] = self.get_rgb_frames(index)
+            output_data["RGB"] = self.get_rgb_frames(index) #(3, 32, 224, 224)
             rgb_mask = np.ones((self.num_position, 1))
         else:
             output_data["RGB"] = torch.rand(3, self.num_frames, 224, 224)
@@ -275,8 +275,9 @@ class EPICKitchensValidation(Dataset):
             output_data,
             action_label,
             masks,
-            action_label, # to fill in the place
-            action_label # to fill in the place
+            action_label, # to fill in the place (audio_pseudo)
+            action_label, # to fill in the place (rgb_pseudo)
+            action_label, # to fill in the place (key)
         )
 
     def __len__(self):

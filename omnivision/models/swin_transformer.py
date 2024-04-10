@@ -777,30 +777,30 @@ class SwinTransformer3D(nn.Module):
         super().__init__()
 
         self.im2vid = Im2Video()
-        self.pretrained = pretrained
-        self.pretrained2d = pretrained2d
-        self.pretrained3d = pretrained3d
+        self.pretrained = pretrained #False
+        self.pretrained2d = pretrained2d #False
+        self.pretrained3d = pretrained3d #None
         self.pretrained_model_key = pretrained_model_key
-        self.num_layers = len(depths)
-        self.embed_dim = embed_dim
-        self.patch_norm = patch_norm
-        self.frozen_stages = frozen_stages
-        self.window_size = window_size
-        self.patch_size = patch_size
+        self.num_layers = len(depths) #4
+        self.embed_dim = embed_dim #96
+        self.patch_norm = patch_norm #true
+        self.frozen_stages = frozen_stages #-1
+        self.window_size = window_size #8, 7, 7
+        self.patch_size = patch_size #2, 4, 4
 
-        self.depth_mode = depth_mode
+        self.depth_mode = depth_mode #'summed_rgb_d_tokens'
         depth_chans = None
         assert in_chans == 3, "Only 3 channels supported"
 
         # split image into non-overlapping patches
-        self.patch_embed = PatchEmbed3D(
+        self.patch_embed = PatchEmbed3D( 
             patch_size=patch_size,
             in_chans=in_chans,
             embed_dim=embed_dim,
             norm_layer=norm_layer if self.patch_norm else None,
         )
 
-        if depth_mode is not None:
+        if depth_mode is not None: #summed_rgb_d_tokens
             msg = f"Using depth mode {depth_mode}"
             logging.info(msg)
             assert depth_mode in ["separate_d_tokens", "summed_rgb_d_tokens", "rgbd"]
@@ -815,12 +815,12 @@ class SwinTransformer3D(nn.Module):
                 assert depth_mode == "rgbd"
                 depth_chans = 4
 
-            self.depth_patch_embed_separate_params = depth_patch_embed_separate_params
+            self.depth_patch_embed_separate_params = depth_patch_embed_separate_params #true
 
-            if depth_patch_embed_separate_params:
-                self.depth_patch_embed = PatchEmbed3D(
+            if depth_patch_embed_separate_params: #true
+                self.depth_patch_embed = PatchEmbed3D( 
                     patch_size=patch_size,
-                    in_chans=depth_chans,
+                    in_chans=depth_chans, #1
                     embed_dim=embed_dim,
                     norm_layer=norm_layer if self.patch_norm else None,
                 )
@@ -851,7 +851,7 @@ class SwinTransformer3D(nn.Module):
         ]  # stochastic depth decay rule
 
         # build layers
-        self.layers = nn.ModuleList()
+        self.layers = nn.ModuleList() #module od Blocks=SwinTransformerBlock3D = norm + windowattention3D + dropout + norm + mlp
         for i_layer in range(self.num_layers):
             layer = BasicLayer(
                 dim=int(embed_dim * 2**i_layer),
@@ -1081,7 +1081,7 @@ class SwinTransformer3D(nn.Module):
                 nn.init.constant_(m.bias, 0)
                 nn.init.constant_(m.weight, 1.0)
 
-        if pretrained:
+        if pretrained: #False
             self.pretrained = pretrained
         if isinstance(self.pretrained, str) or isinstance(self.pretrained, list):
             self.apply(_init_weights)
@@ -1143,10 +1143,10 @@ class SwinTransformer3D(nn.Module):
         has_depth = x.shape[1] == 4
 
         if has_depth:
-            if self.depth_mode in ["summed_rgb_d_tokens"]:
+            if self.depth_mode in ["summed_rgb_d_tokens"]: #summed_rgb_d_tokens
                 x_rgb = x[:, :3, ...]
                 x_d = x[:, 3:, ...]
-                x_d = self.depth_patch_embed(x_d)
+                x_d = self.depth_patch_embed(x_d) #PatchEmbed3D
                 x_rgb = self.patch_embed(x_rgb)
                 # sum the two sets of tokens
                 x = x_rgb + x_d

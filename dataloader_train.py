@@ -5,6 +5,7 @@ import random
 import numpy as np
 import csv
 import os
+#from  torchvision.transforms import _functional_tensor
 from pytorchvideo.transforms import (
     ApplyTransformToKey,
     ShortSideScale,
@@ -14,28 +15,31 @@ from torchvision.transforms._transforms_video import NormalizeVideo
 from transforms import SpatialCrop, TemporalCrop
 from randomerasing import RandomErasing
 from rand_auto_aug import RandAugment
-from mmaction.datasets.pipelines import Compose
+#from mmaction.datasets.pipelines import Compose
 from PIL import Image
+
 
 def get_video_clip(num_frames, clip_len = 32, train_mode = False):
     """
     clip_len: int, the number of frames in the output video clip
     num_frames: int, the total number of frames for the input video
-    test_mode: bool
+    train_mode: bool = true
+
+    it randomly selects an index within the segment for the 32 clips.
     """
 
-    seg_size = float(num_frames - 1) / clip_len
+    seg_size = float(num_frames - 1) / clip_len #len of the sequence of frames = total_n of frames/clip_len
     seq = []
-    for i in range(clip_len):
+    for i in range(clip_len): #32
         start = int(np.round(seg_size * i))
         end = int(np.round(seg_size * (i+1)))
 
-        if train_mode:
+        if train_mode: #true
             seq.append(random.randint(start, end))
         else:
             seq.append((start + end) // 2)
     
-    return np.array(seq)
+    return torch.tensor(seq)#np.array(seq)
 
 def get_verb_classes(annotation_path="epic-annotations/EPIC_100_verb_classes.csv"):
     verb_dict = {}
@@ -69,12 +73,14 @@ class EPICKitchensTrain(Dataset):
         audio_data_path="/path/to/EPIC-KITCHENS-Audio/",
         rgb_data_path = "/path/to/EPIC-KITCHENS/",
         num_position=512,
+        deactivate_KL=False,
     ):
 
         self.audio_conf = audio_conf
         self.audio_data_path = audio_data_path
         self.rgb_data_path = rgb_data_path
         self.num_position = num_position
+        self.deactivate_KL = deactivate_KL
 
         self.get_audio_parameters()
 
@@ -98,8 +104,8 @@ class EPICKitchensTrain(Dataset):
             magnitude=9, magnitude_std=0.5, increasing_severity=True
         )
 
-        verb_dict = get_verb_classes()
-        noun_dict = get_noun_classes()
+        verb_dict = get_verb_classes() #{'verb': number, ...}
+        noun_dict = get_noun_classes() #{'noun': number, ...}
 
         self.action_map = {}
         with open("epic-annotations/epic_action_classes.csv") as f:
@@ -117,17 +123,17 @@ class EPICKitchensTrain(Dataset):
                 self.available_list.append(row[0])
         f.close()
 
-        csv_file_path1 = "epic-annotations/EPIC_100_train_full_half1.csv"
-        csv_file_path2 = "epic-annotations/EPIC_100_train_full_half2.csv"
+        csv_file_path1 = "epic-annotations/EPIC_100_train_full_half1.csv" #RGB samples
+        csv_file_path2 = "epic-annotations/EPIC_100_train_full_half2.csv" #Audio samples
 
-        self.sample_dict = {}
-        with open(csv_file_path1) as f:
+        self.sample_dict = {} #62429 samples
+        with open(csv_file_path1) as f: #read names of half1 samples with RGB modality
             f_csv = csv.reader(f)
             for i, row in enumerate(f_csv):
                 self.sample_dict[row[0]] = ["RGB"]
         f.close()
 
-        with open(csv_file_path2) as f:
+        with open(csv_file_path2) as f: #read names of half2 samples with Audio modality
             f_csv = csv.reader(f)
             for i, row in enumerate(f_csv):
                 self.sample_dict[row[0]] = ["Audio"]
@@ -157,7 +163,7 @@ class EPICKitchensTrain(Dataset):
                 samples.append(row)
         f.close()
 
-        self.data = samples
+        self.data = samples #62297 samples
         self.noun_label_num = 300
         self.verb_label_num = 97
 
@@ -170,7 +176,7 @@ class EPICKitchensTrain(Dataset):
         # dataset spectrogram mean and std, used to normalize the input
         self.audio_norm_mean = self.audio_conf.get("mean")
         self.audio_norm_std = self.audio_conf.get("std")
-        # skip_norm is a flag that if you want to skip normalization to compute the normalization stats using src/get_norm_stats.py, if Ture, input normalization will be skipped for correctly calculating the stats.
+        # skip_norm is a flag that if you want to skip normalization to compute the normalization stats using src/get_norm_stats.py, if True, input normalization will be skipped for correctly calculating the stats.
         # set it as True ONLY when you are getting the normalization stats.
         self.audio_skip_norm = (
             self.audio_conf.get("skip_norm")
@@ -207,6 +213,10 @@ class EPICKitchensTrain(Dataset):
             m = torch.nn.ZeroPad2d((0, 0, 0, p))
             fbank = m(fbank)
         elif p < 0:
+            """
+            it selects a random starting index within the excess frames 
+            and then cuts a segment of the target length starting from that index
+            """
             start_idx = np.random.randint(0, -p, (1,))[0]
             fbank = fbank[start_idx : start_idx + target_length, :]
 
@@ -214,28 +224,29 @@ class EPICKitchensTrain(Dataset):
 
 
     def get_fbank(self, datum):
-        audio_path = os.path.join(self.audio_data_path, datum[1], datum[0] + ".wav")
+        #audio_path = os.path.join(self.audio_data_path, datum[1], datum[0] + ".wav")
+        audio_path = os.path.join(self.audio_data_path, datum[0] + ".wav")
         fbank = self._wav2fbank(audio_path)
 
         # SpecAug, not do for eval set
         freqm = torchaudio.transforms.FrequencyMasking(self.audio_freqm)
         timem = torchaudio.transforms.TimeMasking(self.audio_timem)
         fbank = torch.transpose(fbank, 0, 1)
-        if self.audio_freqm != 0:
+        if self.audio_freqm != 0: #48
             fbank = freqm(fbank)
-        if self.audio_timem != 0:
+        if self.audio_timem != 0: #192
             fbank = timem(fbank.unsqueeze(0))
             fbank = fbank.squeeze(0)
         fbank = torch.transpose(fbank, 0, 1)
 
         # normalize the input for both training and test
-        if not self.audio_skip_norm:
+        if not self.audio_skip_norm: #false
             fbank = (fbank - self.audio_norm_mean) / (self.audio_norm_std * 2)
         # skip normalization the input if you are trying to get the normalization stats.
         else:
             pass
 
-        if self.audio_noise == True:
+        if self.audio_noise == True: #true
             fbank = (
                 fbank
                 + torch.rand(fbank.shape[0], fbank.shape[1]) * np.random.rand() / 10
@@ -250,13 +261,12 @@ class EPICKitchensTrain(Dataset):
         video_path = os.path.join(
             self.rgb_data_path, datum[1], "rgb_frames", datum[2]
         )
-        indices = get_video_clip(end_frame-start_frame, clip_len = self.num_frames, train_mode = True ) + start_frame
+        #generate segment indices based on segment sizes and random selection criteria
+        indices = get_video_clip(end_frame-start_frame, clip_len = self.num_frames, train_mode = True ) + start_frame #32 random indexes
         indices = torch.clamp(indices, start_frame, end_frame).numpy()
-
         frames = []
         for indice in list(indices):
             img = Image.open(os.path.join(video_path, "frame_%010d.jpg" % indice))
-            # img = self.random_augment(img)
             frames.append(np.array(img))
         frames = np.stack(frames)
         frames = np.transpose(frames, (0, 3, 1, 2))
@@ -265,12 +275,12 @@ class EPICKitchensTrain(Dataset):
         # -------- RandomErasing ----------
         # frames = self.random_erasing(frames)
 
-        frames = frames.transpose(0, 1)
+        frames = frames.transpose(0, 1) #(3, 32, 256, 456)
         # -------- Transform ---------
         video_data = {}
         video_data["video"] = frames
-        video_data = self.video_transform(video_data)
-        video_data = torch.stack(video_data["video"]).squeeze(0)
+        video_data = self.video_transform(video_data) 
+        video_data = torch.stack(video_data["video"]).squeeze(0) #(3, 32, 224, 224)
 
         return video_data
 
@@ -283,26 +293,37 @@ class EPICKitchensTrain(Dataset):
     def __getitem__(self, index):
         datum = self.data[index]
         action_label = self.get_label(datum)
-        available_modalities = self.sample_dict[datum[0]]
+        available_modalities = self.sample_dict[datum[0]] #audio/rgb--> modality of the sample
         output_data = {"Audio": None, "RGB": None}
+        
+        #------------Audio------------
         if "Audio" in available_modalities:
             output_data["Audio"] = self.get_fbank(datum)
             audio_mask = np.ones((self.num_position, 1))
-            audio_pseudo = torch.Tensor(np.load("audio_pseudo/" + datum[0] + ".npy"))
-            audio_pseudo = torch.mean(audio_pseudo, dim=0)
+            audio_pseudo_path = "audio_pseudo/" + datum[0] + ".npy"
+            if self.deactivate_KL or not os.path.exists(audio_pseudo_path): #for the first epoch, KL always deactive
+                audio_pseudo = torch.zeros((3806,))
+            else:
+                audio_pseudo = torch.Tensor(np.load(audio_pseudo_path))
+                audio_pseudo = torch.mean(audio_pseudo, dim=0) #(3086, )
         else:
-            output_data["Audio"] = torch.rand(128, 128)
-            audio_mask = np.zeros((self.num_position, 1))
+            output_data["Audio"] = torch.rand(128, 128)  #if it is a frame RGB generate a random Audio sample
+            audio_mask = np.zeros((self.num_position, 1)) #(512, 1)
             audio_pseudo = torch.zeros((3806,))
 
-        # -------------------------------------------------- RGB -------------------------------------------
+        #------------RGB------------
         if "RGB" in available_modalities:
-            output_data["RGB"] = self.get_rgb_frames(datum)
+            output_data["RGB"] = self.get_rgb_frames(datum) #(3, 32, 224, 224)
             rgb_mask = np.ones((self.num_position, 1))
-            rgb_pseudo = torch.Tensor(np.load("rgb_pseudo/" + datum[0] + ".npy"))
-            rgb_pseudo = torch.mean(rgb_pseudo, dim=0)
+            rgs_preudo_path = "rgb_pseudo/" + datum[0] + ".npy"
+
+            if self.deactivate_KL or not os.path.exists(rgs_preudo_path): #for the first epoch, KL always deactive
+                rgb_pseudo = torch.zeros((3806, ))
+            else:
+                rgb_pseudo = torch.Tensor(np.load(rgs_preudo_path))
+                rgb_pseudo = torch.mean(rgb_pseudo, dim=0)
         else:
-            output_data["RGB"] = torch.rand(3, self.num_frames, 224, 224)
+            output_data["RGB"] = torch.rand(3, self.num_frames, 224, 224) #(3, 32, 224, 224)
             rgb_mask = np.zeros((self.num_position, 1))
             rgb_pseudo = torch.zeros((3806, ))
         
@@ -313,10 +334,11 @@ class EPICKitchensTrain(Dataset):
 
         return (
             output_data,
-            action_label,
+            action_label, #label
             masks,
             audio_pseudo,
-            rgb_pseudo
+            rgb_pseudo,
+            datum[0], #key=name of the sample
         )
 
     def __len__(self):

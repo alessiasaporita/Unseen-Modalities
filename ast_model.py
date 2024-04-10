@@ -1,5 +1,4 @@
 import pdb
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,6 +9,7 @@ from itertools import repeat
 import math
 import os
 import wget
+import warnings
 
 
 def _no_grad_trunc_normal_(tensor, mean, std, a, b):
@@ -51,13 +51,16 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
 
 
 def trunc_normal_(tensor, mean=0.0, std=1.0, a=-2.0, b=2.0):
-    # type: (Tensor, float, float, float, float) -> Tensor
+    ## type: (Tensor, float, float, float, float) -> Tensor
     r"""Fills the input Tensor with values drawn from a truncated
     normal distribution. The values are effectively drawn from the
     normal distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`
     with values outside :math:`[a, b]` redrawn until they are within
     the bounds. The method used for generating the random values works
     best when :math:`a \leq \text{mean} \leq b`.
+    Values that fall outside the range [a, b] are redrawn until they are within the bounds defined by a and b.
+    This function is used for weight initialization in neural network models to ensure that the initial weights fall within a certain range, 
+    which can be crucial for stable training and convergence.
     Args:
         tensor: an n-dimensional `torch.Tensor`
         mean: the mean of the normal distribution
@@ -155,9 +158,9 @@ class Attention(nn.Module):
     ):
         super().__init__()
         self.num_heads = num_heads
-        head_dim = dim // num_heads
+        head_dim = dim // num_heads #64
         # NOTE scale factor was wrong in my original version, can set manually to be compat with prev weights
-        self.scale = qk_scale or head_dim ** -0.5
+        self.scale = qk_scale or head_dim ** -0.5 #0.125
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
@@ -205,7 +208,7 @@ class Block(nn.Module):
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
             dim,
-            num_heads=num_heads,
+            num_heads=num_heads, #12
             qkv_bias=qkv_bias,
             qk_scale=qk_scale,
             attn_drop=attn_drop,
@@ -214,10 +217,10 @@ class Block(nn.Module):
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         self.norm2 = norm_layer(dim)
-        mlp_hidden_dim = int(dim * mlp_ratio)
+        mlp_hidden_dim = int(dim * mlp_ratio) #3072
         self.mlp = Mlp(
             in_features=dim,
-            hidden_features=mlp_hidden_dim,
+            hidden_features=mlp_hidden_dim, #dim*4
             act_layer=act_layer,
             drop=drop,
         )
@@ -277,19 +280,19 @@ class PatchEmbed(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768):
         super().__init__()
 
-        img_size = to_2tuple(img_size)
-        patch_size = to_2tuple(patch_size)
-        num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
-        self.img_size = img_size
-        self.patch_size = patch_size
-        self.num_patches = num_patches
-
+        img_size = to_2tuple(img_size) 
+        patch_size = to_2tuple(patch_size) 
+        num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0]) 
+        self.img_size = img_size #(384, 384)
+        self.patch_size = patch_size #(16, 16)
+        self.num_patches = num_patches 
+        #projects the input image patches into the higher-dimensional feature space
         self.proj = nn.Conv2d(
             in_chans, embed_dim, kernel_size=patch_size, stride=patch_size
-        )
+        ) #(1, 768, (16, 16), (10, 10))
 
-    def forward(self, x):
-        x = self.proj(x).flatten(2).transpose(1, 2)
+    def forward(self, x): #x=(num_fbanks, B, 128, 128)
+        x = self.proj(x).flatten(2).transpose(1, 2) #(num_fbanks, B, 128, 128)-->(num_fbanks, 768, 12, 12)-->(num_fbanks, 768, 144)-->(num_fbanks, 144, 768)
         return x
 
 
@@ -339,10 +342,10 @@ class VisionTransformer(nn.Module):
             norm_layer: (nn.Module): normalization layer
         """
         super().__init__()
-        self.num_classes = num_classes
+        self.num_classes = num_classes #1000
         self.num_features = (
             self.embed_dim
-        ) = embed_dim  # num_features for consistency with other models
+        ) = embed_dim  #768 num_features for consistency with other models
         norm_layer = norm_layer or partial(nn.LayerNorm, eps=1e-6)
 
         # embed_dim=768
@@ -354,35 +357,35 @@ class VisionTransformer(nn.Module):
                 embed_dim=embed_dim,
             )
         else:
-            self.patch_embed = PatchEmbed(
+            self.patch_embed = PatchEmbed( #Conv2d(3, 768, kernel_size=(16, 16), stride=(16, 16))
                 img_size=img_size,
                 patch_size=patch_size,
                 in_chans=in_chans,
                 embed_dim=embed_dim,
-            )
-            # img_size=384,patch_size=16,in_chans=3, embed_dim=768
-        num_patches = self.patch_embed.num_patches
-        # num_patches=576
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
+            ) #(b, num_patches, embed_dim=768)
+    
+        num_patches = self.patch_embed.num_patches #576
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim)) #(1, 1, 768)
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim)) #(1, 577, 768)
         self.pos_drop = nn.Dropout(p=drop_rate)
         # pdb.set_trace()
-        dpr = [
+        dpr = [ #12 drop path rates linearly spaced between 0 and 0.3.
             x.item() for x in torch.linspace(0, drop_path_rate, depth)
-        ]  # stochastic depth decay rule, [0.0, 0.027272729203104973, 0.054545458406209946, 0.08181818574666977, 0.10909091681241989, 0.13636364042758942, 0.16363637149333954, 0.19090908765792847, 0.2181818187236786, 0.2454545497894287, 0.27272728085517883, 0.30000001192092896]
+        ]  
+        # stochastic depth decay rule, [0.0, 0.027272729203104973, 0.054545458406209946, 0.08181818574666977, 0.10909091681241989, 0.13636364042758942, 0.16363637149333954, 0.19090908765792847, 0.2181818187236786, 0.2454545497894287, 0.27272728085517883, 0.30000001192092896]
         # embed_dim=768, num_heads=12, mlp_ratio=4.0, qkv_bias=True, qk_scale=None, drop_rate=0.0, representation_size=None
         self.blocks = nn.ModuleList(
             [
-                Block(
-                    dim=embed_dim,
-                    num_heads=num_heads,
-                    mlp_ratio=mlp_ratio,
-                    qkv_bias=qkv_bias,
-                    qk_scale=qk_scale,
-                    drop=drop_rate,
-                    attn_drop=attn_drop_rate,
-                    drop_path=dpr[i],
-                    norm_layer=norm_layer,
+                Block( #encoder block
+                    dim=embed_dim, #768
+                    num_heads=num_heads, #12
+                    mlp_ratio=mlp_ratio, #4.0
+                    qkv_bias=qkv_bias, #true
+                    qk_scale=qk_scale, #none
+                    drop=drop_rate, #0.0
+                    attn_drop=attn_drop_rate, #0.0
+                    drop_path=dpr[i], 
+                    norm_layer=norm_layer, 
                 )
                 for i in range(depth)
             ]
@@ -390,7 +393,7 @@ class VisionTransformer(nn.Module):
         self.norm = norm_layer(embed_dim)
 
         # Representation layer
-        if representation_size:
+        if representation_size: #None
             self.num_features = representation_size
             self.pre_logits = nn.Sequential(
                 OrderedDict(
@@ -405,7 +408,7 @@ class VisionTransformer(nn.Module):
 
         # Classifier head
         self.head = (
-            nn.Linear(self.num_features, num_classes)
+            nn.Linear(self.num_features, num_classes) #embed_dim, 1000
             if num_classes > 0
             else nn.Identity()
         )
@@ -462,6 +465,7 @@ class VisionTransformer(nn.Module):
 
 class DistilledVisionTransformer(VisionTransformer):
     """Vision Transformer with distillation token.
+    It introduces modifications to incorporate a "distillation token" and an additional head for the distilled predictions.
 
     Paper: `Training data-efficient image transformers & distillation through attention` -
         https://arxiv.org/abs/2012.12877
@@ -496,7 +500,7 @@ class DistilledVisionTransformer(VisionTransformer):
         x = torch.cat((cls_tokens, dist_token, x), dim=1)
 
         x = x + self.pos_embed
-        x = self.pos_drop(x)
+        x = self.pos_drop(x) #dropout
 
         for blk in self.blocks:
             x = blk(x)
@@ -514,7 +518,10 @@ class DistilledVisionTransformer(VisionTransformer):
             # during inference, return the average of both classifier predictions
             return (x + x_dist) / 2
 
+"""
+variant of a Vision Transformer (ViT) architecture adapted for Audio Set data.
 
+"""
 class ASTModel(nn.Module):
     def __init__(
         self,
@@ -536,35 +543,36 @@ class ASTModel(nn.Module):
             num_classes=1000,
             **model_kwargs
         )
-        self.original_embedding_dim = self.v.pos_embed.shape[2]
-        new_proj = torch.nn.Conv2d(
+        self.original_embedding_dim = self.v.pos_embed.shape[2] #768
+        new_proj = torch.nn.Conv2d( #to project the patches to the higher dim space original_embedding_dim
             1,
             self.original_embedding_dim,
             kernel_size=(16, 16),
-            stride=(fstride, tstride),
+            stride=(fstride, tstride), #(10, 10)
         )
-        self.v.patch_embed.proj = new_proj
+        self.v.patch_embed.proj = new_proj #Conv2d(1, 768, kernel_size=(16, 16), stride=(10, 10))
 
-        f_dim, t_dim = self.get_shape(fstride, tstride, input_fdim, input_tdim)
-        num_patches = f_dim * t_dim
+        f_dim, t_dim = self.get_shape(fstride, tstride, input_fdim, input_tdim) #12, 12
+        num_patches = f_dim * t_dim #144
 
-        if pretrained is True:
+        if pretrained is True: #True
             default_input_fdim = 128
             default_input_tdim = 1024
-            default_f_dim, default_t_dim = self.get_shape(
+            default_f_dim, default_t_dim = self.get_shape( #12, 101
                 fstride, tstride, default_input_fdim, default_input_tdim
-            )
-            default_num_patches = default_f_dim * default_t_dim
-            self.v.patch_embed.num_patches = default_num_patches
+            ) 
+            default_num_patches = default_f_dim * default_t_dim #1212
+            self.v.patch_embed.num_patches = default_num_patches #1212
 
-            new_pos_embed = nn.Parameter(
+            new_pos_embed = nn.Parameter( #([1, 1214, 768])
                 torch.zeros(
                     1, self.v.patch_embed.num_patches + 2, self.original_embedding_dim
                 )
             )
-            self.v.pos_embed = new_pos_embed
+            self.v.pos_embed = new_pos_embed #([1, 1214, 768])
             trunc_normal_(self.v.pos_embed, std=0.02)
 
+            #loading pretrained weights for the vision transformer from a file.
             v_dict = self.v.state_dict()
             if os.path.exists("pretrained_models/audioset_10_10_0.4593.pth") == False:
                 # this model performs 0.4593 mAP on the audioset eval set
@@ -580,27 +588,29 @@ class ASTModel(nn.Module):
             v_dict.update(pretrained_dict)
             self.v.load_state_dict(pretrained_dict)
 
-            new_pos_embed = (
+            new_pos_embed = (  #([1, 768, 12, 101])
                 self.v.pos_embed[:, 2:, :]
                 .detach()
-                .reshape(1, default_num_patches, self.original_embedding_dim)
-                .transpose(1, 2)
+                .reshape(1, default_num_patches, self.original_embedding_dim) #(1, default_num_patches, self.original_embedding_dim)
+                .transpose(1, 2) #(1, self.original_embedding_dim, default_num_patches)
                 .reshape(1, self.original_embedding_dim, default_f_dim, default_t_dim)
             )
             # if the input sequence length is larger than the original audioset (10s), then cut the positional embedding
-            if t_dim < 101:
+            #temporal dimension (t_dim) is less than 101
+            if t_dim < 101: #12
                 new_pos_embed = new_pos_embed[
-                    :, :, :, 50 - int(t_dim / 2) : 50 - int(t_dim / 2) + t_dim
+                    :, :, :, 50 - int(t_dim / 2) : 50 - int(t_dim / 2) + t_dim #50-6:50-6+t_dim=12
                 ]
             # otherwise interpolate
+            #bilinear interpolation to resize it to the desired spatial and temporal dimensions (f_dim, t_dim)
             else:
                 new_pos_embed = torch.nn.functional.interpolate(
                     new_pos_embed, size=(f_dim, t_dim), mode="bilinear"
                 )
-            new_pos_embed = new_pos_embed.reshape(
+            new_pos_embed = new_pos_embed.reshape( #1, 144, 768
                 1, self.original_embedding_dim, num_patches
-            ).transpose(1, 2)
-            self.v.pos_embed = nn.Parameter(
+            ).transpose(1, 2) #(1, num_patches, self.original_embedding_dim)
+            self.v.pos_embed = nn.Parameter( #1, 146, 768
                 torch.cat([self.v.pos_embed[:, :2, :].detach(), new_pos_embed], dim=1)
             )
         else:
@@ -609,23 +619,23 @@ class ASTModel(nn.Module):
             )
             self.v.pos_embed = new_pos_embed
             trunc_normal_(self.v.pos_embed, std=0.02)
-        self.v.patch_embed.num_patches = num_patches
+        self.v.patch_embed.num_patches = num_patches #144
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(self.original_embedding_dim),
             nn.Linear(self.original_embedding_dim, label_dim),
         )
 
-    def forward(self, x):
+    def forward(self, x): #B=num_of_fbanks in test??
         x = x.unsqueeze(1)
-        x = x.transpose(2, 3)
+        x = x.transpose(2, 3) #(B, 1, 128, 128), 
 
         B = x.shape[0]
-        x = self.v.patch_embed(x)
-        cls_tokens = self.v.cls_token.expand(B, -1, -1)
-        dist_token = self.v.dist_token.expand(B, -1, -1)
+        x = self.v.patch_embed(x) #(B, 144, 768)
+        cls_tokens = self.v.cls_token.expand(B, -1, -1) #(B, 1, 768)
+        dist_token = self.v.dist_token.expand(B, -1, -1) #(B, 1, 768)
         x = torch.cat((cls_tokens, dist_token, x), dim=1)
         x = x + self.v.pos_embed
-        x = self.v.pos_drop(x)
+        x = self.v.pos_drop(x) #dropout
         for blk in self.v.blocks:
             x = blk(x)
         x = self.v.norm(x)
@@ -635,14 +645,14 @@ class ASTModel(nn.Module):
         return x
 
     def get_shape(self, fstride, tstride, input_fdim, input_tdim):
-        test_input = torch.randn(1, 1, input_fdim, input_tdim)
-        test_proj = nn.Conv2d(
+        test_input = torch.randn(1, 1, input_fdim, input_tdim) #1, 1, 128, 128/1024 di default
+        test_proj = nn.Conv2d( #Conv2d(1, 768, kernel_size=(16, 16), stride=(10, 10))
             1,
             self.original_embedding_dim,
             kernel_size=(16, 16),
-            stride=(fstride, tstride),
+            stride=(fstride, tstride), #(10, 10)
         )
-        test_out = test_proj(test_input)
+        test_out = test_proj(test_input) #([1, 768, 12, 12])/ (1, 768, 12, 101) di default
         f_dim = test_out.shape[2]
         t_dim = test_out.shape[3]
         return f_dim, t_dim

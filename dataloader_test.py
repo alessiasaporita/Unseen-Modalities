@@ -42,9 +42,10 @@ def get_noun_classes(annotation_path="epic-annotations/EPIC_100_noun_classes.csv
     return noun_dict
 
 class EPICKitchensTest(Dataset):
-    def __init__(self, audio_conf, split='test', audio_data_path = '/path/to/EPIC-KITCHENS-Audio/', cfg=None, num_position = 512):
+    def __init__(self, audio_conf, split='test', audio_data_path = '/path/to/EPIC-KITCHENS-Audio/', rgb_data_path = "/path/to/EPIC-KITCHENS/", cfg=None, num_position = 512):
         self.audio_conf = audio_conf
         self.audio_data_path = audio_data_path
+        self.rgb_data_path = rgb_data_path
         self.num_position = num_position
 
         self.get_audio_parameters()
@@ -65,9 +66,9 @@ class EPICKitchensTest(Dataset):
             ),
         )
 
-        test_pipeline = cfg.data.test.pipeline
-        self.test_pipeline = Compose(test_pipeline)
-        self.cfg = cfg
+        #test_pipeline = cfg.data.test.pipeline
+        #self.test_pipeline = Compose(test_pipeline)
+        #self.cfg = cfg
 
         verb_dict = get_verb_classes()
         noun_dict = get_noun_classes()
@@ -79,21 +80,21 @@ class EPICKitchensTest(Dataset):
                 self.action_map[str(verb_dict[row[0]]) + "+" + str(noun_dict[row[1]])] = i
         f.close()
 
-        self.available_list = []
+        self.available_list = [] #608 samples
         with open("epic-annotations/available_sound.csv") as f:
             f_csv = csv.reader(f)
             for i, row in enumerate(f_csv):
                 self.available_list.append(row[0])
         f.close()
 
-        self.sample_dict = {}
+        self.sample_dict = {} #read names of test samples with RGB,Audio modality
         with open("epic-annotations/EPIC_100_full_test.csv") as f:
             f_csv = csv.reader(f)
             for i, row in enumerate(f_csv):
                 self.sample_dict[row[0]] = ["Audio", "RGB"]
         f.close()
 
-        samples = []
+        samples = [] #6641 samples
         with open("epic-annotations/EPIC_100_train.csv") as f:
             f_csv = csv.reader(f)
             for i, row in enumerate(f_csv):
@@ -137,13 +138,13 @@ class EPICKitchensTest(Dataset):
         # if add noise for data augmentation
         self.audio_noise = self.audio_conf.get('noise')
 
-    def _wav2fbank(self, filename, start_time, end_time,):
+    def _wav2fbank(self, filename,):
         waveform, sr = torchaudio.load(filename)
         waveform = waveform - waveform.mean()
 
         fbank = torchaudio.compliance.kaldi.fbank(waveform, htk_compat=True, sample_frequency=sr, use_energy=False,
                                                   window_type='hanning', num_mel_bins=self.audio_melbins, dither=0.0, frame_shift=10)
-        target_length = self.audio_conf.get('target_length')
+        target_length = self.audio_conf.get('target_length') #128
         n_frames = fbank.shape[0]
 
         p = target_length - n_frames
@@ -154,7 +155,11 @@ class EPICKitchensTest(Dataset):
             m = torch.nn.ZeroPad2d((0, 0, 0, p))
             fbanks = m(fbank)
             fbanks = fbanks.unsqueeze(0)
-        elif p < 0:
+        elif p < 0: 
+            #it divides the excess frames into segments of the target length,
+            #but it doesnt randomly select the starting index.
+            #It always starts cutting from the beginning of the excess frames.
+            
             # fbanks = fbank[:target_length].unsqueeze(0)
             ids = np.arange(start=0, stop=-p, step=stride)
             fbanks = []
@@ -169,7 +174,8 @@ class EPICKitchensTest(Dataset):
 
     def get_fbank(self, index):
         datum = self.data[index]
-        audio_path = os.path.join(self.audio_data_path, datum[1], datum[0] + ".wav")
+        #audio_path = os.path.join(self.audio_data_path, datum[1], datum[0] + ".wav")
+        audio_path = os.path.join(self.audio_data_path, datum[0] + ".wav")
         fbank = self._wav2fbank(audio_path)
 
         # normalize the input for both training and test
@@ -185,8 +191,10 @@ class EPICKitchensTest(Dataset):
         datum = self.data[index]
         start_frame = int(datum[6])
         end_frame = int(datum[7])
-        video_path = os.path.join('/path/to/EPIC-KITCHENS/', datum[1], 'rgb_frames', datum[2])
-
+        video_path = os.path.join(self.rgb_data_path, datum[1], 'rgb_frames', datum[2])
+        
+        #linspace = evenly spaced values over a specified interval,
+        #generates 32 equally spaced values between start_frame and end_frame.
         indices = torch.linspace(
             start_frame, end_frame, self.num_frames
         )
@@ -194,7 +202,7 @@ class EPICKitchensTest(Dataset):
             indices, start_frame, end_frame
         ).numpy()
         frames = []
-        for indice in list(indices):
+        for indice in list(indices):       
             img = Image.open(os.path.join(video_path, "frame_%010d.jpg" % indice))
             frames.append(np.array(img))
         frames = np.stack(frames)
@@ -223,7 +231,7 @@ class EPICKitchensTest(Dataset):
         available_modalities = ["RGB", "Audio"]
         output_data = {"Audio": None, "RGB": None}
         if "Audio" in available_modalities:
-            output_data["Audio"] = self.get_fbank(index)
+            output_data["Audio"] = self.get_fbank(index) #(num_of_fbanks, 128, 128)
             audio_mask = np.ones((self.num_position, 1))
         else:
             output_data["Audio"] = torch.rand(128, 128)
@@ -231,25 +239,28 @@ class EPICKitchensTest(Dataset):
 
         # -------------------------------------------------- RGB -------------------------------------------
         if "RGB" in available_modalities:
-            output_data['RGB'] = self.get_rgb_frames(index).unsqueeze(0)
+            output_data['RGB'] = self.get_rgb_frames(index).unsqueeze(0) #[1, 3, 32, 224, 224]
             rgb_mask = np.ones((self.num_position, 1))
         else:
-            output_data['RGB'] = torch.rand(1, self.num_frames, 224, 224)
+            output_data['RGB'] = torch.rand(1, self.num_frames, 224, 224) #why 1 instead of 3???
             rgb_mask = np.zeros((self.num_position, 1))
 
         action_label = self.get_label(index)
+
         num_of_fbanks = output_data["Audio"].size()[0]
         new_output_data = {'Audio': [], 'RGB': [],}
+
         for i in range(1):
             rgb_clip = output_data['RGB'][i:i+1]
-            rgb_clip = torch.tile(rgb_clip, (num_of_fbanks, 1, 1, 1, 1))
+            rgb_clip = torch.tile(rgb_clip, (num_of_fbanks, 1, 1, 1, 1)) #(num_of_fbanks, 3, 32, 224, 224)
             new_output_data['RGB'].append(rgb_clip)
             new_output_data['Audio'].append(output_data["Audio"])
-        new_output_data['RGB'] = torch.cat(new_output_data['RGB'], dim=0)
-        new_output_data['Audio'] = torch.cat(new_output_data['Audio'], dim=0)
+            
+        new_output_data['RGB'] = torch.cat(new_output_data['RGB'], dim=0) #(num_of_fbanks, 3, 32, 224, 224)
+        new_output_data['Audio'] = torch.cat(new_output_data['Audio'], dim=0) #(num_of_fbanks, 128, 128)
         
-        rgb_mask = np.ones((new_output_data['RGB'].size()[0], self.num_position, 1))
-        audio_mask = np.ones((new_output_data['RGB'].size()[0], self.num_position, 1))
+        rgb_mask = np.ones((new_output_data['RGB'].size()[0], self.num_position, 1)) #(num_of_fbanks, 512, 1)
+        audio_mask = np.ones((new_output_data['RGB'].size()[0], self.num_position, 1)) #(num_of_fbanks, 512, 1)
         flow_mask = np.zeros((new_output_data['RGB'].size()[0], self.num_position, 1))
 
         return new_output_data["RGB"], new_output_data["Audio"], action_label, rgb_mask.astype(np.float32), audio_mask.astype(np.float32)

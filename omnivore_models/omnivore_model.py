@@ -85,7 +85,7 @@ def _omnivore_base(
     trunk: nn.Module,
     heads: Optional[Union[nn.Module, nn.ModuleDict]] = None,
     head_dim_in: int = 1024,
-    pretrained: bool = True,
+    pretrained: bool = True, #false
     progress: bool = True,
     load_heads: bool = True,
     checkpoint_name: str = "omnivore_swinB",
@@ -108,24 +108,25 @@ def _omnivore_base(
     Returns:
         model: nn.Module of the full Omnivore model
     """
-    if load_heads and heads is None:
+    if load_heads and heads is None: #true
         # Get heads
         heads = get_all_heads(dim_in=head_dim_in)
 
-    if pretrained:
-        path = CHECKPOINT_PATHS[checkpoint_name]
+    if pretrained: #false-->true
+        path = CHECKPOINT_PATHS[checkpoint_name] #"omnivore_swinT"
         if checkpoint_name == 'omnivore_swinT':
-            checkpoint = torch.load("swinT_checkpoint.torch")
+            #checkpoint = torch.load("swinT_checkpoint.torch")
+            checkpoint = torch.load("pretrained_models/swinT_checkpoint.torch")
         # All models are loaded onto CPU by default
-        # checkpoint = load_state_dict_from_url(
-        #     path, progress=progress, map_location="cpu"
-        # )
+            #checkpoint = load_state_dict_from_url(
+            #    path, progress=progress, map_location="cpu"
+            #)
         trunk.load_state_dict(checkpoint["trunk"])
 
         if load_heads:
             heads.load_state_dict(checkpoint["heads"])
 
-    if load_heads:
+    if load_heads: #true
         model = OmnivoreModel(trunk=trunk, heads=heads)
     else:
         model = trunk
@@ -253,7 +254,7 @@ def omnivore_swinB_imagenet21k(
 
 
 def omnivore_swinS(
-    pretrained: bool = True,
+    pretrained: bool = True, #false
     progress: bool = True,
     load_heads: bool = True,
     **kwargs: Any,
@@ -291,14 +292,14 @@ def omnivore_swinS(
         trunk=trunk,
         head_dim_in=768,  # 96*8
         progress=progress,
-        pretrained=pretrained,
+        pretrained=pretrained, #false
         load_heads=load_heads,
         checkpoint_name="omnivore_swinS",
     )
 
 
 def omnivore_swinT(
-    pretrained: bool = True,
+    pretrained: bool = True, #false
     progress: bool = True,
     load_heads: bool = True,
     **kwargs: Any,
@@ -335,9 +336,9 @@ def omnivore_swinT(
     return _omnivore_base(
         trunk=trunk,
         head_dim_in=768,  # 96*8
-        progress=progress,
-        pretrained=pretrained,
-        load_heads=load_heads,
+        progress=progress, #true
+        pretrained=pretrained, #false-->true
+        load_heads=load_heads, #true
         checkpoint_name="omnivore_swinT",
     )
 
