@@ -1,6 +1,5 @@
 ## [Learning Unseen Modality Interaction](https://arxiv.org/abs/2306.12795) (NeurIPS 2023)
 
-Yunhua Zhang, Hazel Doughty, Cees G.M. Snoek
 
 <img width="1595" alt="Screenshot 2024-01-22 at 16 38 34" src="https://github.com/xiaobai1217/Unseen-Modality-Interaction/assets/22721775/ecc432fb-722d-41bc-befc-4add1a5abb5d">
 
