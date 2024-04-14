@@ -6,3 +6,4 @@ Output/
 *.sh
 pretrained_models/
 *.npy
+wandb/

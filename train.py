@@ -13,6 +13,7 @@ import warnings
 from torch.cuda.amp import GradScaler
 import torch.nn.functional as F
 #import datetime
+import shutil
 from ast_configs import get_audio_configs
 #from mmaction.apis import init_recognizer, inference_recognizer
 from omnivore_models.omnivore_model import omnivore_swinB_imagenet21k, omnivore_swinT
@@ -336,10 +337,10 @@ if __name__ == "__main__":
     loss_fn = LabelSmoothLoss(smoothing=0.1) #loss supervised
     loss_fn = loss_fn.cuda()
 
-    kl_loss_fn = nn.KLDivLoss(reduce=False) #loss pseudolabel
+    kl_loss_fn = nn.KLDivLoss(reduce=False) #pseudo loss 
     kl_loss_fn = kl_loss_fn.cuda()
 
-    optim = torch.optim.SGD(
+    optim = torch.optimfde.SGD(
         list(multimodal_model.parameters())+list(reorganization_module.parameters()) + list(alignment_model.parameters()), lr=args.lr, momentum=0.9, weight_decay=5e-4
     )
     scheduler = MultiStepLR(optim, milestones=[70], gamma=0.1)
@@ -361,6 +362,16 @@ if __name__ == "__main__":
         initial_epoch = checkpoint['epoch'] + 1
         BestLoss = checkpoint['best_loss']
         BestAcc = checkpoint['best_acc']
+    else: #starting training and using KL loss
+        if not args.deactivate_KL:
+            base_paths = ["audio_pseudo/", "rgb_pseudo/"]
+            for base_path in base_paths:
+                if not os.path.exists(base_path):
+                    os.mkdir(base_path)
+                else: #start with an empty folder
+                    shutil.rmtree(base_path)
+                    os.makedirs(base_path)
+
 
     train_loader = torch.utils.data.DataLoader(
         EPICKitchensTrain(

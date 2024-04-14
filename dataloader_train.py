@@ -127,7 +127,7 @@ class EPICKitchensTrain(Dataset):
         csv_file_path2 = "epic-annotations/EPIC_100_train_full_half2.csv" #Audio samples
 
         self.sample_dict = {} #62429 samples
-        with open(csv_file_path1) as f: #read names of half1 samples with RGB modality
+        with open(csv_file_path1) as f: #read names of half1 samples with RGB modality:  
             f_csv = csv.reader(f)
             for i, row in enumerate(f_csv):
                 self.sample_dict[row[0]] = ["RGB"]
