@@ -44,6 +44,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--save_name", type=str, help="name to save the predictions", default="1e4",
     )
+    parser.add_argument(
+        "--resume_checkpoint", type=str, help="path to the checkpoint file", default="checkpoints/best_multimodal_KL",
+    )
     args = parser.parse_args()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -87,7 +90,7 @@ if __name__ == "__main__":
     reorganization_module = torch.nn.DataParallel(reorganization_module)
     reorganization_module = reorganization_module.to(device)
 
-    checkpoint = torch.load("checkpoints/best_multimodal1e4.pt")
+    checkpoint = torch.load(args.resume_checkpoint)
     multimodal_model.load_state_dict(checkpoint['model'])
     multimodal_model.eval()
 
@@ -108,7 +111,6 @@ if __name__ == "__main__":
     save_path = 'predictions/'
     if not os.path.exists(save_path):
         os.mkdir(save_path)
-    
     pred_path = "predictions/{}.csv".format(args.save_name)
     num1 = 5
 

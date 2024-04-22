@@ -1,20 +1,18 @@
 from ast_model import ASTModel
-#import pdb
 from dataloader_train import EPICKitchensTrain
 from dataloader_validation import EPICKitchensValidation
 import torch
 import argparse
 import tqdm
 import os
+import shutil
 import numpy as np
 import torch.nn as nn
 import random
 import warnings
 from torch.cuda.amp import GradScaler
 import torch.nn.functional as F
-#import datetime
 from ast_configs import get_audio_configs
-#from mmaction.apis import init_recognizer, inference_recognizer
 from omnivore_models.omnivore_model import omnivore_swinB_imagenet21k, omnivore_swinT
 from vit import ViT
 from feature_reorganization import ViTReorganization
@@ -84,7 +82,6 @@ def train_one_step(
     loss_fn,
     kl_loss_fn,
     scaler,
-    scheduler,
     indice,
     last_indice,
     gc,
@@ -109,8 +106,8 @@ def train_one_step(
 
     #ALIGNMENT LOSS: max similarity between average vectors of the samples and the corrisponding class tokens, ie min euclidean distance between average vectors and the class tokens
     #Audio and RGB labels
-    audio_labels = labels[audio_indices] ##(number of audio samples, ), labels of audio samples
-    rgb_labels = labels[rgb_indices] ##(number of rgb samples, ), labels of rgb samples
+    audio_labels = labels[audio_indices] #(number of audio samples, ), labels of audio samples
+    rgb_labels = labels[rgb_indices] #(number of rgb samples, ), labels of rgb samples
     audio_onehot_labels = F.one_hot(audio_labels, num_classes = 3806) #(number of audio samples, 3086) 
     rgb_onehot_labels = F.one_hot(rgb_labels, num_classes = 3806) #(number of rgb samples, 3086) 
     #Audio and RGB distances
@@ -124,16 +121,14 @@ def train_one_step(
     #Total Loss: L-supervised + gamma L-pseudo + alpha L-align, with gamma = 3000, alpha = 0.001 
 
     if args.deactivate_KL or audio_pseudo.sum()==0 or rgb_pseudo.sum()==0: #if not the first epoch
-        #Total loss
         output_loss = loss = loss_fn(outputs[:,0], labels) +  0.001 * alignment_loss
     else:
-        #PSEUDO LOSS
+        #PSEUDO LOSS: mean KL-divergence between log-prob of audio and pseudo label, rgb and rgb pseudo label, multiplied for their weigths=number of rgb/audio samples
         audio_pseudo = audio_pseudo[audio_indices]
         rgb_pseudo = rgb_pseudo[rgb_indices]
         probs = torch.softmax(outputs[:,1], dim=-1)
         audio_prob = probs[audio_indices] #(number of audio samples, 3086) 
         rgb_prob = probs[rgb_indices] #(number of rgb samples, 3086) 
-        #KL-divergence between log-prob of audio and pseudo label, rgb and rgb pseudo label, multiplied for their weigths
         kl_loss = torch.mean(kl_loss_fn(torch.log(audio_prob), audio_pseudo)) * torch.sum(audio_indices) + torch.mean(kl_loss_fn(torch.log(rgb_prob), rgb_pseudo)) * torch.sum(rgb_indices)
         
         #Total loss
@@ -146,7 +141,6 @@ def train_one_step(
         scaler.step(optim)
         scaler.update()
         optim.zero_grad()
-        scheduler.step()  
 
     return outputs, output_loss
 
@@ -212,6 +206,9 @@ if __name__ == "__main__":
         default="checkpoints/best.pt",
     )
     parser.add_argument(
+        "--save_all", type=bool, help="save all checkpoints or not", default=False
+    )
+    parser.add_argument(
         "--num_position", type=int, help="number of projection tokens", default=512,
     )
     parser.add_argument(
@@ -247,7 +244,7 @@ if __name__ == "__main__":
     device = "cuda"  # or 'cpu'
     device = torch.device(device)
 
-    base_path = "checkpoints/"
+    base_path = "/work/tesi_asaporita/UnseenModalities/checkpoints/"
     if not os.path.exists(base_path):
         os.mkdir(base_path)
 
@@ -358,10 +355,21 @@ if __name__ == "__main__":
         initial_epoch = checkpoint['epoch'] + 1
         BestLoss = checkpoint['best_loss']
         BestAcc = checkpoint['best_acc']
+    else: #starting training
+        if not args.deactivate_KL: #using KL loss
+            base_paths = ["audio_pseudo/", "rgb_pseudo/"]
+            for b_path in base_paths:
+                if not os.path.exists(b_path):
+                    os.mkdir(b_path)
+                else: #start with an empty folder
+                    shutil.rmtree(b_path)
+                    os.makedirs(b_path)
+
 
     train_loader = torch.utils.data.DataLoader(
         EPICKitchensTrain(
             audio_conf=train_audio_configs,
+            split="train",
             audio_data_path = args.audio_data_path,
             rgb_data_path = args.rgb_data_path,
             num_position=args.num_position,
@@ -391,10 +399,6 @@ if __name__ == "__main__":
     
     print("---------------Start Training---------------")
     with open(log_path, "a") as f:
-        
-        #RGB_npy = {}
-        #Audio_npy={}
-              
         for epoch_i in range(initial_epoch, args.num_epochs):
             print("Epoch: %02d" % epoch_i)
             for split in ["train", "val"]:
@@ -430,7 +434,6 @@ if __name__ == "__main__":
                                 loss_fn,
                                 kl_loss_fn,
                                 scaler,
-                                scheduler,
                                 i,
                                 len(dataloaders[split]),
                                 args.gc,
@@ -441,12 +444,12 @@ if __name__ == "__main__":
                                 truth_outputs = outputs[:,0,:] #(B, 3086) = first CLS token = predictions
                                 detached_outputs = truth_outputs.detach().cpu()
                                 detached_outputs = torch.softmax(detached_outputs, dim=-1)
-
+                                
                                 #For each sample in the batch, save its relative prediction
                                 for i in range(len(keys)): 
                                     if masks['RGB'][i].sum()!=0: #RGB sample
                                         save_path = "rgb_pseudo/{}.npy".format(keys[i])
-                                        if os.path.exists(save_path):
+                                        if os.path.exists(save_path): #predictions for i-th sample 
                                             rgb_pseudo = np.load(save_path)
                                             if rgb_pseudo.shape[0]>=args.e:
                                                 rgb_pseudo=rgb_pseudo[-9:]
@@ -454,16 +457,6 @@ if __name__ == "__main__":
                                         else:
                                             rgb_pseudo=detached_outputs[i].unsqueeze(0).numpy()
                                         np.save("rgb_pseudo/{}.npy".format(keys[i]), rgb_pseudo)
-                                        """
-                                        if keys[i] in RGB_npy:
-                                            #more than e=10 predictions
-                                            if len(RGB_npy[keys[i]]>args.e):
-                                                RGB_npy[keys[i]].pop(0) #remove the older prediction 
-                                            
-                                            RGB_npy[keys[i]].append(detached_outputs[i].numpy())
-                                        else:
-                                            RGB_npy[keys[i]]=[detached_outputs[i].numpy()]
-                                        """
                                     if masks['Audio'][i].sum()!=0: #Audio sample
                                         save_path = "audio_pseudo/{}.npy".format(keys[i])
                                         if os.path.exists(save_path):
@@ -474,16 +467,6 @@ if __name__ == "__main__":
                                         else:
                                             audio_pseudo=detached_outputs[i].unsqueeze(0).numpy()
                                         np.save("audio_pseudo/{}.npy".format(keys[i]), audio_pseudo)
-                                        """
-                                        if keys[i] in Audio_npy:
-                                            #more than e=10 predictions
-                                            if len(Audio_npy[keys[i]]>args.e):
-                                                Audio_npy[keys[i]].pop(0) #remove the older prediction
-
-                                            Audio_npy[keys[i]].append(detached_outputs[i].numpy())
-                                        else:
-                                            Audio_npy[keys[i]]=[detached_outputs[i].numpy()]
-                                        """
 
                         else:  #val
                             outputs, loss = val_one_step(
@@ -526,25 +509,14 @@ if __name__ == "__main__":
                     )
                     f.flush()
                     #wandb log, split = train, val
-                    if split=='train':
-                        wandb.log({"train/lr": scheduler.get_last_lr()[0]}) #epoch lr
-                        wandb.log({"train/lr_epoch": epoch_i})
-
-
                     wandb.log({"{}/loss".format(split): total_loss / float(count), "{}/loss_epoch".format(split): epoch_i}) #epoch loss
                     wandb.log({"{}/acc".format(split): acc / float(count), "{}/acc_epoch".format(split): epoch_i}) #epoch accuracy 
-                    """
-                    if not args.deactivate_KL: 
-                        #save the predictions for each sample          
-                        if split=='train': 
-                            for key in RGB_npy:
-                                np.save("rgb_pseudo/{}.npy".format(key), RGB_npy[key])
 
-                            for key in Audio_npy:
-                                np.save("audio_pseudo/{}.npy".format(key), Audio_npy[key])
-                    """
-                
-            if acc / float(count) > BestAcc:
+            scheduler.step()
+            wandb.log({"train/lr": scheduler.get_last_lr()[0]}) #epoch lr
+            wandb.log({"train/lr_epoch": epoch_i})
+
+            if acc / float(count) > BestAcc or (args.save_all and epoch_i % 4 == 0): #save model every 4 epochs
                 BestLoss = total_loss / float(count)
                 BestEpoch = epoch_i
                 BestAcc = acc / float(count)
@@ -561,6 +533,6 @@ if __name__ == "__main__":
                 }
 
                 torch.save(
-                    save, base_path + "best_multimodal{}.pt".format(args.save_name)
+                    save, base_path + "best_multimodal{}{}.pt".format(args.save_name, epoch_i)
                 )     
     f.close()
