@@ -1,19 +1,16 @@
-from ast_model import ASTModel
-from dataloader_train import EPICKitchensTrain
-from dataloader_validation import EPICKitchensValidation
 import torch
 import argparse
 import tqdm
 import os
+import webdataset as wds
 import shutil
 import numpy as np
 import torch.nn as nn
 import random
+from braceexpand import braceexpand
 import warnings
 from torch.cuda.amp import GradScaler
 import torch.nn.functional as F
-from ast_configs import get_audio_configs
-from omnivore_models.omnivore_model import omnivore_swinB_imagenet21k, omnivore_swinT
 from vit import ViT
 from feature_reorganization import ViTReorganization
 import wandb
@@ -29,12 +26,6 @@ def dict_to_cuda(data):
         data[key] = value.cuda()
     return data
 
-def spatialtemporal2tokens(data):
-    b, c, f, h, w = data.size()
-    data = data.view(b, c, f * h * w)
-    data = data.transpose(1, 2).contiguous()
-    return data
-
 def save_pseudo_labels(outputs, keys, masks):
     truth_outputs = outputs[:,0,:] #(B, 3086) = first CLS token = predictions
     detached_outputs = truth_outputs.detach().cpu()
@@ -44,7 +35,7 @@ def save_pseudo_labels(outputs, keys, masks):
     for i in range(len(keys)): 
         #------------RGB------------
         if masks['RGB'][i].sum()!=0: #RGB sample
-            save_path = "rgb_pseudo/{}.npy".format(keys[i])
+            save_path = "rgb_pseudo_web/{}.npy".format(keys[i])
             if os.path.exists(save_path): #predictions for i-th sample 
                 rgb_pseudo = np.load(save_path)
                 if rgb_pseudo.shape[0]>=10:
@@ -52,10 +43,10 @@ def save_pseudo_labels(outputs, keys, masks):
                 rgb_pseudo = np.concatenate((rgb_pseudo, detached_outputs[i].unsqueeze(0).numpy()))
             else:
                 rgb_pseudo=detached_outputs[i].unsqueeze(0).numpy()
-            np.save("rgb_pseudo/{}.npy".format(keys[i]), rgb_pseudo)
+            np.save("rgb_pseudo_web/{}.npy".format(keys[i]), rgb_pseudo)
         #------------Audio------------
         if masks['Audio'][i].sum()!=0: #Audio sample
-            save_path = "audio_pseudo/{}.npy".format(keys[i])
+            save_path = "audio_pseudo_web/{}.npy".format(keys[i])
             if os.path.exists(save_path):
                 audio_pseudo = np.load(save_path)
                 if audio_pseudo.shape[0]>=10:
@@ -63,7 +54,41 @@ def save_pseudo_labels(outputs, keys, masks):
                 audio_pseudo = np.concatenate((audio_pseudo, detached_outputs[i].unsqueeze(0).numpy()))
             else:
                 audio_pseudo=detached_outputs[i].unsqueeze(0).numpy()
-            np.save("audio_pseudo/{}.npy".format(keys[i]), audio_pseudo)
+            np.save("audio_pseudo_web/{}.npy".format(keys[i]), audio_pseudo)
+
+def get_pseudo_labels(keys, masks, deactivate_KL):
+    audio_pseudo_labels = []
+    rgb_pseudo_labels = []
+    for i in range(len(keys)): 
+        #------------Audio------------
+        if masks['Audio'][i].sum()!=0: #Audio sample
+            audio_pseudo_path = "rgb_pseudo_web/{}.npy".format(keys[i])
+            if deactivate_KL or not os.path.exists(audio_pseudo_path): #for the first epoch, KL always deactive
+                audio_pseudo = torch.zeros((3806,))
+            else:
+                audio_pseudo = torch.Tensor(np.load(audio_pseudo_path))
+                audio_pseudo = torch.mean(audio_pseudo, dim=0) #(3086, )
+        else: #RGB sample
+            audio_pseudo = torch.zeros((3806,))
+
+        #------------RGB------------
+        if masks['RGB'][i].sum()!=0: #RGB sample
+            rgs_preudo_path = "audio_pseudo_web/{}.npy".format(keys[i])
+            if deactivate_KL or not os.path.exists(rgs_preudo_path): #for the first epoch, KL always deactive
+                rgb_pseudo = torch.zeros((3806, ))
+            else:
+                rgb_pseudo = torch.Tensor(np.load(rgs_preudo_path))
+                rgb_pseudo = torch.mean(rgb_pseudo, dim=0)
+        else: #Audio sample
+            rgb_pseudo = torch.zeros((3806, ))
+        
+        rgb_pseudo_labels.append(rgb_pseudo)
+        audio_pseudo_labels.append(audio_pseudo)
+
+    audio_pseudo_labels=torch.stack(audio_pseudo_labels, dim=0)
+    rgb_pseudo_labels = torch.stack(rgb_pseudo_labels , dim=0)
+    
+    return audio_pseudo_labels, rgb_pseudo_labels
 
 class LabelSmoothLoss(nn.Module):
     def __init__(self, smoothing=0.0):
@@ -90,21 +115,12 @@ class AlignmentModule(nn.Module):
         sim = torch.mean((base_vectors - input) ** 2, dim=-1) #[B, 3806], euclidean distance between the average vectors of the batch and each class tokens
         return sim 
 
-def extract_features(unimodal_models, data):
-    outputs = {}
-    for key, value in data.items(): #key = Audio, RGB
-        outputs[key] = unimodal_models[key](value)
-        if key == 'RGB':
-            outputs[key] = spatialtemporal2tokens(outputs[key])
-    return outputs
-
 def train_one_step(
     data,
     labels,
     masks,
     audio_pseudo,
     rgb_pseudo,
-    unimodal_models,
     multimodal_model,
     reorganization_module,
     alignment_model,
@@ -116,11 +132,8 @@ def train_one_step(
     last_indice,
     gc,
 ):
-    with torch.no_grad():
-        outputs = extract_features(unimodal_models, data) #RGB = (B, 784, 768), Audio = (B, 146, 768)
-
     rgb, audio = reorganization_module( #feature projection = (B, 512, 256) = (B, k*, d*)
-        outputs['RGB'], outputs['Audio'] 
+        data['RGB'], data['Audio'] 
     ) 
 
     audio_sim = alignment_model(audio) #sim = [B, 3806]
@@ -179,7 +192,6 @@ def val_one_step(
     data,
     labels,
     masks,
-    unimodal_models,
     multimodal_model,
     reorganization_module,
     alignment_model,
@@ -187,10 +199,8 @@ def val_one_step(
     gc,
 ):
     with torch.no_grad():
-        outputs = extract_features(unimodal_models, data)
-
         rgb, audio = reorganization_module(
-            outputs['RGB'], outputs['Audio']
+            data['RGB'], data['Audio']
         )
         outputs = multimodal_model(
             rgb, audio, masks['RGB'], masks['Audio']
@@ -212,20 +222,26 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, help="batch size", default=96)
     parser.add_argument("--deactivate_KL", type=bool, help="Deactivate KL loss", default=False)
     parser.add_argument(
-        "--audio_data_path",
+        "--train_data_path",
         type=str,
-        help="path to data",
-        default="/path/to/EPIC-KITCHENS-Audio-Clip/",
+        help="path to train data",
+        default="/work/tesi_asaporita/UnseenModalities/webdataset/epic_kitchens-training-{000..012}.tar",
     )
     parser.add_argument(
-        "--rgb_data_path",
+        "--val_data_path",
         type=str,
-        help="path to data",
-        default="/path/to/EPIC-KITCHENS/",
+        help="path to validation data",
+        default="/work/tesi_asaporita/UnseenModalities/webdataset/epic_kitchens-validation-{000..001}.tar",
+    )
+    parser.add_argument(
+        "--n_train_samples", type=int, help="number of training samples", default=62297,
+    )
+    parser.add_argument(
+        "--n_val_samples", type=int, help="number of training samples", default=6215,
     )
     parser.add_argument(
         "--save_name", type=str, help="name to save the model", default="1e-1",
-    ) #1e-1, ...
+    ) 
     parser.add_argument(
         "--resume_training", type=bool, help="resume training or not", default=False
     )
@@ -254,7 +270,7 @@ if __name__ == "__main__":
 
     wandb.init(
         project="Unseen_Modalities Baseline",
-        name='Unseen Modalities',
+        name='Unseen Modalities WEB',
         config={
         "learning_rate": args.lr,
         "epochs": args.num_epochs,
@@ -279,49 +295,6 @@ if __name__ == "__main__":
         os.mkdir(base_path)
 
     batch_size = args.batch_size #96
-    target_length = 128
-    train_audio_configs, val_audio_configs = get_audio_configs(
-        target_length=target_length
-    )
-
-    """
-    Pretrained unimodal encoders
-    Audio: AST
-    RGB: SWIN-T
-    """
-    #audio
-    audio_model = ASTModel( 
-        label_dim=3806,
-        fstride=10,
-        tstride=10,
-        input_fdim=128,
-        input_tdim=target_length, #128
-        imagenet_pretrain=False,
-        audioset_pretrain=False,
-        model_size="base384",
-    ) 
-    audio_model = audio_model.to(device)
-    audio_model = nn.DataParallel(audio_model)
-    #checkpoint = torch.load("checkpoints/audio.pt")
-    #audio_model.load_state_dict(checkpoint["model"])
-    audio_model.eval()
-
-    #rgb
-    rgb_model = omnivore_swinT(pretrained=True) 
-    rgb_model.heads = nn.Sequential(
-        nn.Dropout(p=0.5), nn.Linear(in_features=768, out_features=3806, bias=True)
-    )
-    rgb_model.multimodal_model = False
-    rgb_model = torch.nn.DataParallel(rgb_model)
-    #checkpoint = torch.load("checkpoints/rgb.pt")
-    #rgb_model.load_state_dict(checkpoint["state_dict"])
-    rgb_model = rgb_model.to(device)
-    rgb_model.eval()
-
-    unimodal_models = { #audio, RGB
-        'RGB': rgb_model,
-        'Audio': audio_model
-    }
 
     """
     Multimodal Transfomer
@@ -387,44 +360,14 @@ if __name__ == "__main__":
         BestAcc = checkpoint['best_acc']
     else: #starting training
         if not args.deactivate_KL: #using KL loss
-            base_paths = ["audio_pseudo/", "rgb_pseudo/"]
+            base_paths = ["audio_pseudo_web/", "rgb_pseudo_web/"]
             for b_path in base_paths:
                 if not os.path.exists(b_path):
                     os.mkdir(b_path)
                 else: #start with an empty folder
                     shutil.rmtree(b_path)
-                    os.makedirs(b_path)
+                    os.makedirs(b_path) 
 
-
-    train_loader = torch.utils.data.DataLoader(
-        EPICKitchensTrain(
-            audio_conf=train_audio_configs,
-            split="train",
-            audio_data_path = args.audio_data_path,
-            rgb_data_path = args.rgb_data_path,
-            num_position=args.num_position,
-            deactivate_KL=args.deactivate_KL,
-        ),
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=args.workers,
-        pin_memory=True,
-    )
-    val_loader = torch.utils.data.DataLoader(
-        EPICKitchensValidation(
-            audio_conf=val_audio_configs,
-            split="validation",
-            audio_data_path = args.audio_data_path,
-            rgb_data_path = args.rgb_data_path,
-            num_position=args.num_position,
-        ),
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=args.workers,
-        pin_memory=True,
-    )
-
-    dataloaders = {"train": train_loader, "val": val_loader}
     log_path = "logs/{}.csv".format(args.save_name)
     
     print("---------------Start Training---------------")
@@ -439,16 +382,62 @@ if __name__ == "__main__":
                 print(split)
                 multimodal_model.train(split == "train")
                 reorganization_module.train(split == "train")  
-                alignment_model.train(split == "train")  
+                alignment_model.train(split == "train") 
 
-                with tqdm.tqdm(total=len(dataloaders[split])) as pbar:
-                    for (i,(data, labels, masks, audio_pseudo, rgb_pseudo, keys),) in enumerate(dataloaders[split]):
+                if split == 'train':
+                    path = args.train_data_path
+                    n=args.n_train_samples
+                elif split == 'val':
+                    path = val_data_path 
+                    n=args.n_val_samples  
+                else:
+                    raise NotImplementedError()
+    
+                ds = wds.DataPipeline(
+                    wds.SimpleShardList(braceexpand(path)),
+                    wds.tarfile_to_samples(),
+                    wds.split_by_worker,
+                    wds.split_by_node,
+                ).with_length(n)
+
+                dataloader = wds.WebLoader(ds, batch_size=batch_size, num_workers=args.workers, pin_memory=True)
+                num_batches =  ds.size // batch_size
+
+                with tqdm.tqdm(total=num_batches) as pbar:
+                    for (i,sample) in enumerate(dataloader):
+                        #------------Features------------
+                        rgb_features = [wds.torch_loads(item) for item in sample['rgb_features.pth']]
+                        rgb_features = torch.stack(rgb_features , dim=0)
+                        audio_features = [wds.torch_loads(item) for item in sample['audio_features.pth']]
+                        audio_features = torch.stack(audio_features , dim=0)
+                        data = {
+                            "RGB": rgb_features,
+                            "Audio": audio_features,
+                        }
                         data = dict_to_cuda(data) #dict with RGB =(B, 3, 32, 224, 224), Audio=(B, 128, 128)
+
+                        #------------Masks------------
+                        rgb_mask = [wds.torch_loads(item) for item in sample['rgb_mask.pth']]
+                        rgb_mask = torch.stack(rgb_mask , dim=0)
+                        audio_mask = [wds.torch_loads(item) for item in sample['audio_mask.pth']]
+                        audio_mask = torch.stack(audio_mask , dim=0)
+                        masks = {
+                            "RGB": rgb_mask,
+                            "Audio": audio_mask,
+                        }
                         masks = dict_to_cuda(masks) #dict with 'RGB'=(B, 512, 1), Audio=(B, 512, 1)
-                        labels = labels.cuda() #(B, )
+                        
+                        #------------Pseudo Labels------------
+                        keys = [s.split('__')[1] for s in sample['__key__']]
+                        audio_pseudo, rgb_pseudo = get_pseudo_labels(keys, masks, args.deactivate_KL)
                         audio_pseudo = audio_pseudo.cuda() #(3086, )
                         rgb_pseudo = rgb_pseudo.cuda() #(3086, )
 
+                        #------------Labels------------
+                        labels = [int(item.decode()) for item in sample['action_label']] #(B, )
+                        labels = torch.tensor(labels).cuda()
+
+                        #------------Train Step------------
                         if split == "train":
                             outputs, loss = train_one_step(
                                 data,
@@ -456,7 +445,6 @@ if __name__ == "__main__":
                                 masks,
                                 audio_pseudo,
                                 rgb_pseudo,
-                                unimodal_models,
                                 multimodal_model,
                                 reorganization_module,
                                 alignment_model,
@@ -465,20 +453,19 @@ if __name__ == "__main__":
                                 kl_loss_fn,
                                 scaler,
                                 i,
-                                len(dataloaders[split]),
+                                num_batches,
                                 args.gc,
                             )
-
                             #Save the prediction for each sample in the batch as pseudo_labels
                             if not args.deactivate_KL:
                                 save_pseudo_labels(outputs, keys, masks)
 
+                        #------------Validation Step------------
                         else:  #val
                             outputs, loss = val_one_step(
                                 data,
                                 labels,
                                 masks,
-                                unimodal_models,
                                 multimodal_model,
                                 reorganization_module,
                                 alignment_model,
@@ -504,6 +491,7 @@ if __name__ == "__main__":
                             )
                         )
                         pbar.update()
+                    
                     f.write(
                         "{},{},{},{}\n".format(
                             epoch_i,
@@ -513,13 +501,12 @@ if __name__ == "__main__":
                         )
                     )
                     f.flush()
-                    #wandb log, split = train, val
                     wandb.log({"{}/loss".format(split): total_loss / float(count), "{}/loss_epoch".format(split): epoch_i}) #epoch loss
                     wandb.log({"{}/acc".format(split): acc / float(count), "{}/acc_epoch".format(split): epoch_i}) #epoch accuracy 
 
             scheduler.step()
             wandb.log({"train/lr": scheduler.get_last_lr()[0]}) #epoch lr
-            wandb.log({"train/lr_epoch": epoch_i})
+            #wandb.log({"train/lr_epoch": epoch_i})
 
             if acc / float(count) > BestAcc or (args.save_all and epoch_i % 4 == 0): #save model every 4 epochs
                 BestLoss = total_loss / float(count)
