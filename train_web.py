@@ -14,6 +14,7 @@ import torch.nn.functional as F
 from vit import ViT
 from feature_reorganization import ViTReorganization
 import wandb
+import math
 import os
 from torch.optim.lr_scheduler import MultiStepLR
 
@@ -388,7 +389,7 @@ if __name__ == "__main__":
                     path = args.train_data_path
                     n=args.n_train_samples
                 elif split == 'val':
-                    path = val_data_path 
+                    path = args.val_data_path 
                     n=args.n_val_samples  
                 else:
                     raise NotImplementedError()
@@ -400,8 +401,8 @@ if __name__ == "__main__":
                     wds.split_by_node,
                 ).with_length(n)
 
-                dataloader = wds.WebLoader(ds, batch_size=batch_size, num_workers=args.workers, pin_memory=True)
-                num_batches =  ds.size // batch_size
+                dataloader = wds.WebLoader(ds, batch_size=batch_size, num_workers=args.workers, pin_memory=True).shuffle(n)
+                num_batches =  math.ceil(ds.size/batch_size)
 
                 with tqdm.tqdm(total=num_batches) as pbar:
                     for (i,sample) in enumerate(dataloader):
@@ -491,6 +492,11 @@ if __name__ == "__main__":
                             )
                         )
                         pbar.update()
+
+                        del rgb_features
+                        del audio_features
+                        del rgb_mask
+                        del audio_mask
                     
                     f.write(
                         "{},{},{},{}\n".format(

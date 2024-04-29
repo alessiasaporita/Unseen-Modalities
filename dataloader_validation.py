@@ -204,7 +204,7 @@ class EPICKitchensValidation(Dataset):
         fbank = self._wav2fbank(audio_path)
 
         # normalize the input for both training and test
-        if not self.audio_skip_norm: #false
+        if not self.audio_skip_norm: #true
             fbank = (fbank - self.audio_norm_mean) / (self.audio_norm_std * 2)
         # skip normalization the input if you are trying to get the normalization stats.
         else:
@@ -246,6 +246,42 @@ class EPICKitchensValidation(Dataset):
         action_label = self.action_map[action_key]
 
         return action_label
+
+
+    def get_value_by_index(self, index):
+        datum = self.data[index]
+        available_modalities = ["RGB", "Audio"]
+        output_data = {"Audio": None, "RGB": None}
+        
+        #------------Audio------------
+        if "Audio" in available_modalities:
+            output_data["Audio"] = self.get_fbank(index)
+            audio_mask = np.ones((self.num_position, 1))
+        else:
+            output_data["Audio"] = torch.rand(128, 128)  #if it is a frame RGB generate a random Audio sample
+            audio_mask = np.zeros((self.num_position, 1)) #(512, 1)
+
+        #------------RGB------------
+        if "RGB" in available_modalities:
+            output_data["RGB"] = self.get_rgb_frames(index) #(3, 32, 224, 224)
+            rgb_mask = np.ones((self.num_position, 1))
+        else:
+            output_data["RGB"] = torch.rand(3, self.num_frames, 224, 224) #(3, 32, 224, 224)
+            rgb_mask = np.zeros((self.num_position, 1))
+        
+        action_label = self.get_label(index)
+        masks = {
+            "RGB": rgb_mask.astype(np.float32),
+            "Audio": audio_mask.astype(np.float32),
+        }
+
+        return (
+            output_data,
+            action_label, #label
+            masks,
+            datum[0], #key=name of the sample
+        )
+
 
     def __getitem__(self, index):
         available_modalities = ["RGB", "Audio"] 
