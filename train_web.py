@@ -492,11 +492,6 @@ if __name__ == "__main__":
                             )
                         )
                         pbar.update()
-
-                        del rgb_features
-                        del audio_features
-                        del rgb_mask
-                        del audio_mask
                     
                     f.write(
                         "{},{},{},{}\n".format(
