@@ -1,7 +1,7 @@
 import torch
 import argparse
 import tqdm
-import os
+import os, io, sys
 import webdataset as wds
 import shutil
 import numpy as np
@@ -401,26 +401,27 @@ if __name__ == "__main__":
                     wds.split_by_node,
                 ).with_length(n)
 
-                dataloader = wds.WebLoader(ds, batch_size=batch_size, num_workers=args.workers, pin_memory=True).shuffle(n)
+                dataloader = wds.WebLoader(ds, batch_size=batch_size, num_workers=args.workers, pin_memory=True).shuffle(5000).to_tuple("__key__", "rgb_features.pth", "rgb_mask.pth", "audio_features.pth", "audio_mask.pth", "action_label")
                 num_batches =  math.ceil(ds.size/batch_size)
 
                 with tqdm.tqdm(total=num_batches) as pbar:
                     for (i,sample) in enumerate(dataloader):
+                        keys, rgb_features, rgb_mask, audio_features, audio_mask, action_label = sample
                         #------------Features------------
-                        rgb_features = [wds.torch_loads(item) for item in sample['rgb_features.pth']]
+                        rgb_features = [wds.torch_loads(item) for item in rgb_features]
                         rgb_features = torch.stack(rgb_features , dim=0)
-                        audio_features = [wds.torch_loads(item) for item in sample['audio_features.pth']]
+                        audio_features = [wds.torch_loads(item) for item in audio_features]
                         audio_features = torch.stack(audio_features , dim=0)
                         data = {
                             "RGB": rgb_features,
                             "Audio": audio_features,
                         }
-                        data = dict_to_cuda(data) #dict with RGB =(B, 3, 32, 224, 224), Audio=(B, 128, 128)
+                        data = dict_to_cuda(data) #dict with RGB =(B, 784, 768), Audio=(B, 146, 768)
 
                         #------------Masks------------
-                        rgb_mask = [wds.torch_loads(item) for item in sample['rgb_mask.pth']]
+                        rgb_mask = [wds.torch_loads(item) for item in rgb_mask] 
                         rgb_mask = torch.stack(rgb_mask , dim=0)
-                        audio_mask = [wds.torch_loads(item) for item in sample['audio_mask.pth']]
+                        audio_mask = [wds.torch_loads(item) for item in audio_mask] 
                         audio_mask = torch.stack(audio_mask , dim=0)
                         masks = {
                             "RGB": rgb_mask,
@@ -429,13 +430,13 @@ if __name__ == "__main__":
                         masks = dict_to_cuda(masks) #dict with 'RGB'=(B, 512, 1), Audio=(B, 512, 1)
                         
                         #------------Pseudo Labels------------
-                        keys = [s.split('__')[1] for s in sample['__key__']]
+                        keys = [s.split('__')[1] for s in keys]
                         audio_pseudo, rgb_pseudo = get_pseudo_labels(keys, masks, args.deactivate_KL)
                         audio_pseudo = audio_pseudo.cuda() #(3086, )
                         rgb_pseudo = rgb_pseudo.cuda() #(3086, )
 
                         #------------Labels------------
-                        labels = [int(item.decode()) for item in sample['action_label']] #(B, )
+                        labels = [int(item.decode()) for item in action_label] #(B, )
                         labels = torch.tensor(labels).cuda()
 
                         #------------Train Step------------
