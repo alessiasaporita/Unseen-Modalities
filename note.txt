@@ -1,0 +1,40 @@
+For the pseudo-labels used to train the second branch, we average the unimodal predictions across training epochs to get
+modality-specific pseudo-labels
+
+We obtain the pseudo-labels by averaging the predictions from the last e epochs of the pretrained unimodal encoders. For video
+classification, e=10.
+
+Our method is trained with 120 epochs on video classification with a learning rate of 10−4, reduced to 10−5 for the last 50
+epochs.
+
+
+Note that our proposed feature projection and dual branch prediction are added on top of a
+vanilla multimodal transformer. Feature projection + Dual branch prediction contribute to performance improvement for unseen
+modality combinations and the improvement over a vanilla transformer is considerable.y
+
+We compare with: (i) Unimodal encoders which use the unimodal features of a single
+modality with a linear layer for prediction, (ii) Late fusion which uses the average of the predictions
+from the unimodal encoders, (iii) Vanilla transformer which uses the multimodal fusion from [9]. To
+use this vanilla transformer with modality-incomplete training data, we use a series of per-modality
+learnable tokens in place of the missing modality.
+
+
+                        Lalign      Lpseudo     RGB&Audio
+RGB                                             18.2
+Audio                                           10.9
+
+Vanilla transformer                             19.3
+
+                                                22.1
+Feature projection      ✓                       23.5 (+4.2)
++Dual-branch            ✓           ✓          25.7 (++2.2)
+
+We ablate the effectiveness of adding the alignment loss Lalign and the pseudo-supervised loss Lpseudo to the
+task-specific loss. We use our full model with both the feature projection and the dual branch
+prediction. When not using the pseudo-supervised loss, we use the same supervised loss for both
+branches.
+
+
+Since our feature projection module introduces additional
+parameters over a vanilla multimodal transformer, we reduce the number of parameters from 14.4M to 7.2M, 
+which is equal to the number used in a vanilla multimodal transformer.

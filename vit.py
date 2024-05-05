@@ -150,8 +150,9 @@ class ViT(nn.Module): #num_classes=3806, dim=256,  depth=6, heads=8, mlp_dim=512
             nn.LayerNorm(768),
             nn.Linear(768, dim),
             nn.LayerNorm(dim)
-        ) 
-        """
+        )
+        """ 
+
         per_branch = num_position // branch_num #256
         branch_masks = []
         """

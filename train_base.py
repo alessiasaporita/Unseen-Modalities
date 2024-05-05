@@ -35,38 +35,6 @@ def spatialtemporal2tokens(data):
     data = data.transpose(1, 2).contiguous()
     return data
 
-"""
-def save_pseudo_labels(outputs, keys, masks):
-    truth_outputs = outputs[:,0,:] #(B, 3086) = first CLS token = predictions
-    detached_outputs = truth_outputs.detach().cpu()
-    detached_outputs = torch.softmax(detached_outputs, dim=-1)
-
-    #For each sample in the batch, save its relative prediction
-    for i in range(len(keys)): 
-        #------------RGB------------
-        if masks['RGB'][i].sum()!=0: #RGB sample
-            save_path = "rgb_pseudo/{}.npy".format(keys[i])
-            if os.path.exists(save_path): #predictions for i-th sample 
-                rgb_pseudo = np.load(save_path)
-                if rgb_pseudo.shape[0]>=10:
-                    rgb_pseudo=rgb_pseudo[-9:]
-                rgb_pseudo = np.concatenate((rgb_pseudo, detached_outputs[i].unsqueeze(0).numpy()))
-            else:
-                rgb_pseudo=detached_outputs[i].unsqueeze(0).numpy()
-            np.save("rgb_pseudo/{}.npy".format(keys[i]), rgb_pseudo)
-        #------------Audio------------
-        if masks['Audio'][i].sum()!=0: #Audio sample
-            save_path = "audio_pseudo/{}.npy".format(keys[i])
-            if os.path.exists(save_path):
-                audio_pseudo = np.load(save_path)
-                if audio_pseudo.shape[0]>=10:
-                    audio_pseudo=audio_pseudo[-9:]
-                audio_pseudo = np.concatenate((audio_pseudo, detached_outputs[i].unsqueeze(0).numpy()))
-            else:
-                audio_pseudo=detached_outputs[i].unsqueeze(0).numpy()
-            np.save("audio_pseudo/{}.npy".format(keys[i]), audio_pseudo)
-
-"""
 class LabelSmoothLoss(nn.Module):
     def __init__(self, smoothing=0.0):
         super(LabelSmoothLoss, self).__init__()
@@ -81,17 +49,6 @@ class LabelSmoothLoss(nn.Module):
         loss = (-weight * log_prob).sum(dim=-1).mean() #cross-entropy loss
         return loss
 
-class AlignmentModule(nn.Module):
-    def __init__(self, dim=256):
-        super(AlignmentModule, self).__init__()
-        self.base_vectors = nn.Parameter(torch.randn(1, 3806, dim)) #(1, 3086, d*), d*=256, class tokens to be learnt 
-    
-    def forward(self, input): # input [B, 512, 256]
-        input = torch.mean(input, dim=1, keepdim=True) # [B, 1, d*], mean vectors of the samples in the batch
-        base_vectors = self.base_vectors.repeat(input.size()[0], 1, 1) #[B, 3806, d*], class tokens
-        sim = torch.mean((base_vectors - input) ** 2, dim=-1) #[B, 3806], euclidean distance between the average vectors of the batch and each class tokens
-        return sim 
-
 def extract_features(unimodal_models, data):
     outputs = {}
     for key, value in data.items(): #key = Audio, RGB
@@ -104,20 +61,15 @@ def train_one_step(
     data,
     labels,
     masks,
-    audio_pseudo,
-    rgb_pseudo,
     unimodal_models,
     multimodal_model,
     reorganization_module,
-    alignment_model,
     optim,
     loss_fn,
-    kl_loss_fn,
     scaler,
     indice,
     last_indice,
     gc,
-    deactivate_KL,
 ):
     with torch.no_grad():
         outputs = extract_features(unimodal_models, data) #RGB = (B, 784, 768), Audio = (B, 146, 768)
@@ -126,47 +78,11 @@ def train_one_step(
         outputs['RGB'], outputs['Audio'] 
     ) 
 
-    audio_sim = alignment_model(audio) #sim = [B, 3806]
-    rgb_sim = alignment_model(rgb) #sim = [B, 3806]
-
     outputs = multimodal_model( #(B, 2, 3086), the two CLS tokens
         rgb, audio, masks['RGB'], masks['Audio']
     ) 
 
-    #Audio and RGB sample indices
-    audio_indices = torch.sum(masks['Audio'].squeeze(-1), dim=-1) > 0 #(B,) -> indeces of audio samples true/false
-    rgb_indices = torch.sum(masks['RGB'].squeeze(-1), dim=-1) > 0 #(B,) -> indeces of RGB samples true/false
-
-    #ALIGNMENT LOSS: max similarity between average vectors of the samples and the corrisponding class tokens, ie min euclidean distance between average vectors and the class tokens
-    #Audio and RGB labels
-    audio_labels = labels[audio_indices] #(number of audio samples, ), labels of audio samples
-    rgb_labels = labels[rgb_indices] #(number of rgb samples, ), labels of rgb samples
-    audio_onehot_labels = F.one_hot(audio_labels, num_classes = 3806) #(number of audio samples, 3086) 
-    rgb_onehot_labels = F.one_hot(rgb_labels, num_classes = 3806) #(number of rgb samples, 3086) 
-    #Audio and RGB distances
-    audio_sim = audio_sim[audio_indices] #(number of audio samples, 3086) 
-    rgb_sim = rgb_sim[rgb_indices] #(number of RGB samples, 3086)
-    audio_sim = torch.sum(audio_sim * audio_onehot_labels, dim=-1) #(number of audio samples, ) 
-    rgb_sim = torch.sum(rgb_sim * rgb_onehot_labels, dim=-1) #(number of RGB samples, )
-
-    alignment_loss = (torch.sum(audio_sim) + torch.sum(rgb_sim)) / (torch.sum(audio_indices) + torch.sum(rgb_indices))
-
-    #Total Loss: L-supervised + gamma L-pseudo + alpha L-align, with gamma = 3000, alpha = 0.001 
-
-    if deactivate_KL or audio_pseudo.sum()==0 or rgb_pseudo.sum()==0: #if not the first epoch
-        output_loss = loss = (loss_fn(outputs[:,0], labels) + loss_fn(outputs[:,1], labels)) * 0.5 +  0.001 * alignment_loss
-    else:
-        #PSEUDO LOSS: mean KL-divergence between log-prob of audio and pseudo label, rgb and rgb pseudo label, multiplied for their weigths=number of rgb/audio samples
-        audio_pseudo = audio_pseudo[audio_indices]
-        rgb_pseudo = rgb_pseudo[rgb_indices]
-        probs = torch.softmax(outputs[:,1], dim=-1)
-        audio_prob = probs[audio_indices] #(number of audio samples, 3086) 
-        rgb_prob = probs[rgb_indices] #(number of rgb samples, 3086) 
-        kl_loss = torch.mean(kl_loss_fn(torch.log(audio_prob), audio_pseudo)) * torch.sum(audio_indices) + torch.mean(kl_loss_fn(torch.log(rgb_prob), rgb_pseudo)) * torch.sum(rgb_indices)
-        
-        #Total loss
-        output_loss = loss = loss_fn(outputs[:,0], labels) + kl_loss / labels.size()[0] * 3000 +  0.001 * alignment_loss
-    
+    output_loss = loss = (loss_fn(outputs[:,0], labels) + loss_fn(outputs[:,1], labels)) * 0.5
     loss = loss / gc
     scaler.scale(loss).backward()
 
@@ -185,7 +101,6 @@ def val_one_step(
     unimodal_models,
     multimodal_model,
     reorganization_module,
-    alignment_model,
     loss_fn,
     gc,
 ):
@@ -199,7 +114,6 @@ def val_one_step(
             rgb, audio, masks['RGB'], masks['Audio']
         )
         output_loss = loss = (loss_fn(outputs[:,0], labels) + loss_fn(outputs[:,1], labels)) * 0.5
-        #loss = loss / gc
     
     return outputs, output_loss
 
@@ -257,7 +171,7 @@ if __name__ == "__main__":
 
     wandb.init(
         project="Unseen_Modalities Baseline",
-        name='Unseen Modalities',
+        name='Unseen Modalities Base',
         config={
         "learning_rate": args.lr,
         "epochs": args.num_epochs,
@@ -353,21 +267,12 @@ if __name__ == "__main__":
     reorganization_module = torch.nn.DataParallel(reorganization_module)
     reorganization_module = reorganization_module.to(device)
 
-    """
-    Alignment: align embeddings with learnable class tokens 
-    """
-    alignment_model = AlignmentModule() 
-    alignment_model = torch.nn.DataParallel(alignment_model)
-    alignment_model = alignment_model.to(device)
-
     loss_fn = LabelSmoothLoss(smoothing=0.1) #loss supervised
     loss_fn = loss_fn.cuda()
 
-    kl_loss_fn = nn.KLDivLoss(reduce=False) #loss pseudolabel
-    kl_loss_fn = kl_loss_fn.cuda()
 
     optim = torch.optim.SGD(
-        list(multimodal_model.parameters())+list(reorganization_module.parameters()) + list(alignment_model.parameters()), lr=args.lr, momentum=0.9, weight_decay=5e-4
+        list(multimodal_model.parameters())+list(reorganization_module.parameters()), lr=args.lr, momentum=0.9, weight_decay=5e-4
     )
     scheduler = MultiStepLR(optim, milestones=[70], gamma=0.1)
     scaler = GradScaler()
@@ -381,7 +286,6 @@ if __name__ == "__main__":
         checkpoint = torch.load(args.resume_checkpoint)
         multimodal_model.load_state_dict(checkpoint["model"])
         reorganization_module.load_state_dict(checkpoint["reorganization"])
-        alignment_model.load_state_dict(checkpoint["alignment"])
         optim.load_state_dict(checkpoint['optimizer'])
         scaler.load_state_dict(checkpoint['scaler']) 
         scheduler.load_state_dict(checkpoint['scheduler'])
@@ -433,37 +337,28 @@ if __name__ == "__main__":
                 print(split)
                 multimodal_model.train(split == "train")
                 reorganization_module.train(split == "train")  
-                alignment_model.train(split == "train")  
 
                 with tqdm.tqdm(total=len(dataloaders[split])) as pbar:
                     for (i,(data, labels, masks, audio_pseudo, rgb_pseudo, keys),) in enumerate(dataloaders[split]):
                         data = dict_to_cuda(data) #dict with RGB =(B, 3, 32, 224, 224), Audio=(B, 128, 128)
                         masks = dict_to_cuda(masks) #dict with 'RGB'=(B, 512, 1), Audio=(B, 512, 1)
                         labels = labels.cuda() #(B, )
-                        audio_pseudo = audio_pseudo.cuda() #(3086, )
-                        rgb_pseudo = rgb_pseudo.cuda() #(3086, )
 
                         if split == "train": 
                             outputs, loss = train_one_step(
                                 data,
                                 labels,
                                 masks,
-                                audio_pseudo,
-                                rgb_pseudo,
                                 unimodal_models,
                                 multimodal_model,
                                 reorganization_module,
-                                alignment_model,
                                 optim,
                                 loss_fn,
-                                kl_loss_fn,
                                 scaler,
                                 i,
                                 len(dataloaders[split]),
                                 args.gc,
-                                args.deactivate_KL,
                             )
-
 
                         else:  #val
                             outputs, loss = val_one_step(
@@ -473,7 +368,6 @@ if __name__ == "__main__":
                                 unimodal_models,
                                 multimodal_model,
                                 reorganization_module,
-                                alignment_model,
                                 loss_fn,
                                 args.gc,
                             )
@@ -521,7 +415,6 @@ if __name__ == "__main__":
                     "epoch": epoch_i,
                     "model": multimodal_model.state_dict(),
                     "reorganization": reorganization_module.state_dict(),
-                    "alignment": alignment_model.state_dict(),
                     "optimizer": optim.state_dict(),
                     "scaler": scaler.state_dict(),
                     "scheduler": scheduler.state_dict(),

@@ -1187,7 +1187,7 @@ class SwinTransformer3D(nn.Module):
         else:
             x = self._apply_norm(x)
             # Mean over the spatiotemporal dimensions
-            #x = torch.mean(x, [-3, -2, -1])
+            x = torch.mean(x, [-3, -2, -1])
 
             return x
 
