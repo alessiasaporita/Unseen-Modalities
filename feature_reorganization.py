@@ -148,38 +148,36 @@ class ViTReorganization(nn.Module): #dim=256, depth=6, heads=8, mlp_dim=512, num
         ) 
 
 
-    
+    #reorganization --> (B, 768, 784) * (B, 784, 512) -> (B, 768, 512)
     def reorganization(self, feature, position):
-        feature = torch.matmul(
+        feature = torch.matmul(         #F^t * O = (d=768 x k^m) * (k^m x k*) = (d=768, k*=512)
             feature.transpose(1, 2).contiguous(), position
-        ) #F^t * O = (d*=768 x k^m) * (k^m x k*) = (d*=768, k*=512)
-        #RGB reorganization --> (B, 768, 784) * (B, 784, 512) -> (B, 768, 512)
-        #Audio reorganization --> (B, 768, 146) * (B, 146, 512) -> (B, 768, 512)
-        feature = feature.transpose(1, 2).contiguous() #(B, 512, 768) = (k*, d*)
+        ) 
+        feature = feature.transpose(1, 2).contiguous() #(B, 512, 768) = (k*, d)
         return feature
 
-    def forward(self, rgb_inputs, audio_inputs): #= (B, k^m, d*) = (B, 784, 768) / (B, 146, 768)
+    def forward(self, rgb_inputs, audio_inputs): # (B, 784, 768) / (B, 146, 768)
 
-        rgb = self.rgb_embedding(rgb_inputs) + self.rgb_pos_embedding #(B, 784, 768)->(B, 784, 256) 
-        audio = self.audio_embedding(audio_inputs) + self.audio_pos_embedding #(B, 146, 768)->(B, 146, 256)
+        rgb = self.rgb_embedding(rgb_inputs) + self.rgb_pos_embedding                   #(B, 784, 256) 
+        audio = self.audio_embedding(audio_inputs) + self.audio_pos_embedding           #(B, 146, 256)
 
         rgb = self.dropout(rgb)
         audio = self.dropout(audio)
 
-        rgb = self.rgb_transformer(rgb) #(B, 784, 256)
-        audio = self.audio_transformer(audio) #(B, 146, 256)
+        rgb = self.rgb_transformer(rgb)             #(B, 784, 256)
+        audio = self.audio_transformer(audio)       #(B, 146, 256)
 
-        rgb = self.rgb_head(rgb) #(B, 784, 512) = (k^m x k*)
-        audio = self.audio_head(audio) #(B, 146, 512) = (k^m x k*)
+        rgb = self.rgb_head(rgb)        #(B, 784, 512) = (k x k*)
+        audio = self.audio_head(audio)  #(B, 146, 512) = (k x k*)
 
         rgb = torch.softmax(rgb, dim = -1)
         audio = torch.softmax(audio, dim=-1)
 
-        rgb = self.reorganization(rgb_inputs, rgb) #(B, 512, 768) = (k*, d)
-        audio = self.reorganization(audio_inputs, audio) #(B, 512, 768) = (k*, d)
+        rgb = self.reorganization(rgb_inputs, rgb)          #(B, 512, 768)
+        audio = self.reorganization(audio_inputs, audio)    #(B, 512, 768) 
 
         #this part of code was missing from the researchers and was implemented by us 
-        rgb = self.rgb_proj(rgb) #(B, 512, 256) = (k*, d*)
-        audio = self.audio_proj(audio) #(B, 512, 256) = (k*, d*)
+        rgb = self.rgb_proj(rgb)        #(B, 512, 256) = (k*, d*)
+        audio = self.audio_proj(audio)  #(B, 512, 256) = (k*, d*)
   
         return rgb, audio

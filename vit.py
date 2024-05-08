@@ -83,8 +83,8 @@ class Attention(nn.Module):
         v = cat (B, 1, 512)+(B, 258:514=256, 512)
         """
         for i in range(branch_num):
-            q = torch.cat((qs[:, i:(i+1), :], qs[:, (i*per_branch+branch_num) : ((i+1)*per_branch + branch_num), :] ), dim=1) #(B, 257, 512)
-            q = rearrange(q, 'b n (h d) -> b h n d', h = self.heads) #([B, 8, 257, 64])
+            q = torch.cat((qs[:, i:(i+1), :], qs[:, (i*per_branch+branch_num) : ((i+1)*per_branch + branch_num), :] ), dim=1)
+            q = rearrange(q, 'b n (h d) -> b h n d', h = self.heads)
             k = torch.cat((ks[:, i:(i+1), :], ks[:, (i*per_branch+branch_num) : ((i+1)*per_branch + branch_num), :] ), dim=1)
             k = rearrange(k, 'b n (h d) -> b h n d', h = self.heads)
             v = torch.cat((vs[:, i:(i+1), :], vs[:, (i*per_branch+branch_num) : ((i+1)*per_branch + branch_num), :] ), dim=1)
@@ -93,13 +93,13 @@ class Attention(nn.Module):
             dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
             attn = self.attend(dots)
             attn = self.dropout(attn)
-            out = torch.matmul(attn, v) #(B, 8, 257, 64)
-            out = rearrange(out, 'b h n d -> b n (h d)') #(B, 257, 512)
+            out = torch.matmul(attn, v)
+            out = rearrange(out, 'b h n d -> b n (h d)')
             cls_outputs.append(out[:,:1])
             outputs.append(out[:,1:])
-        out = torch.cat(outputs, dim=1) #(B, 512, 512)
-        cls_outputs = torch.cat(cls_outputs, dim=1) #(B, 2, 512)
-        out = torch.cat((cls_outputs, out), dim=1) #(B, 514, 512)
+        out = torch.cat(outputs, dim=1)
+        cls_outputs = torch.cat(cls_outputs, dim=1)
+        out = torch.cat((cls_outputs, out), dim=1)
         # q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
 
         # dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
@@ -153,29 +153,16 @@ class ViT(nn.Module): #num_classes=3806, dim=256,  depth=6, heads=8, mlp_dim=512
         )
         """ 
 
-        per_branch = num_position // branch_num #256
+        per_branch = num_position // branch_num
         branch_masks = []
-        """
-        ([1, 1, 8, 514, 514]) ---> ([1, 2, 8, 514, 514]) two branch masks NEVER USED!!!!
-
-        [:, :, :, 2:258, 2:258]=1
-        cls mask = [:, :, :, 0, 2:258] = 1
-        cls mask = [:, :, :, 2:258, 0] = 1
-        [:, :, :, 0, 0]= 1 
-        ________________________________
-        [:, :, :, 258:514, 258:514] = 1
-        cls mask = [:, :, :, 1, 2:258] = 1
-        cls mask = [:, :, :, 258:514, 1] = 1
-        [:, :, :, 1, 1]= 1
-        """
-        for i in range(branch_num): #2
-            branch_mask1 = torch.zeros((1, 1, heads, num_position + branch_num, num_position + branch_num)) #([1, 1, 8, 514, 514])
-            branch_mask1[:, :, :, (i*per_branch + branch_num) :((i+1)*per_branch + branch_num), (i*per_branch + branch_num) :((i+1)*per_branch + branch_num)] = 1 
-            branch_mask1[:, :, :, i, (i*per_branch + branch_num) :((i+1)*per_branch + branch_num)] = 1 
-            branch_mask1[:, :, :, (i*per_branch + branch_num) :((i+1)*per_branch + branch_num), i] = 1 
+        for i in range(branch_num):
+            branch_mask1 = torch.zeros((1, 1, heads, num_position + branch_num, num_position + branch_num))
+            branch_mask1[:, :, :, (i*per_branch + branch_num) :((i+1)*per_branch + branch_num), (i*per_branch + branch_num) :((i+1)*per_branch + branch_num)] = 1
+            branch_mask1[:, :, :, i, (i*per_branch + branch_num) :((i+1)*per_branch + branch_num)] = 1 # cls mask
+            branch_mask1[:, :, :, (i*per_branch + branch_num) :((i+1)*per_branch + branch_num), i] = 1 # cls mask
             branch_mask1[:,:,:,i,i] = 1
             branch_masks.append(branch_mask1)
-        self.branch_masks = torch.cat(branch_masks, dim=1) #[1, 2, 8, 514, 514])
+        self.branch_masks = torch.cat(branch_masks, dim=1) #[1, branch_num, heads, num_position, num_position]
         self.branch_num = branch_num
 
         self.pos_embedding = nn.Parameter(torch.randn(1, num_position + branch_num, dim)) #(1, 514, 256)
@@ -196,7 +183,7 @@ class ViT(nn.Module): #num_classes=3806, dim=256,  depth=6, heads=8, mlp_dim=512
         #rgb = self.rgb_embedding(rgb) #(B, 512, 256)
         #audio = self.audio_embedding(audio) #(B, 512, 256)
         
-        features = rgb * rgb_mask + audio * audio_mask #sum of audio and rgb samples, (B, 512, 256)
+        features = rgb * rgb_mask + audio * audio_mask 
         
         b, n, _ = features.shape
         x = features + self.pos_embedding[:, self.branch_num:]

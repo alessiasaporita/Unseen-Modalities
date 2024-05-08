@@ -261,7 +261,6 @@ class EPICKitchensTrain(Dataset):
         video_path = os.path.join(
             self.rgb_data_path, datum[1], "rgb_frames", datum[2]
         )
-        #generate segment indices based on segment sizes and random selection criteria
         indices = get_video_clip(end_frame-start_frame, clip_len = self.num_frames, train_mode = True ) + start_frame #32 random indexes
         indices = torch.clamp(indices, start_frame, end_frame).numpy()
         frames = []
@@ -280,7 +279,7 @@ class EPICKitchensTrain(Dataset):
         video_data = {}
         video_data["video"] = frames
         video_data = self.video_transform(video_data) 
-        video_data = torch.stack(video_data["video"]).squeeze(0) #(3, 32, 224, 224)
+        video_data = torch.stack(video_data["video"]).squeeze(0)    #(3, 32, 224, 224)
 
         return video_data
 
@@ -369,7 +368,7 @@ class EPICKitchensTrain(Dataset):
 
         return (
             output_data,
-            action_label, #label
+            action_label, 
             masks,
             audio_pseudo,
             rgb_pseudo,

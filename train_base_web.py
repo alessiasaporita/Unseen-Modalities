@@ -364,7 +364,7 @@ if __name__ == "__main__":
             wandb.log({"train/lr": scheduler.get_last_lr()[0]}) #epoch lr
             #wandb.log({"train/lr_epoch": epoch_i})
 
-            if acc / float(count) > BestAcc or (args.save_all and epoch_i % 4 == 0): #save model every 4 epochs
+            if acc / float(count) > BestAcc: 
                 BestLoss = total_loss / float(count)
                 BestEpoch = epoch_i
                 BestAcc = acc / float(count)
@@ -381,5 +381,20 @@ if __name__ == "__main__":
 
                 torch.save(
                     save, base_path + "best_multimodal{}{}.pt".format(args.save_name, epoch_i)
-                )     
+                )  
+                   
+            if args.save_all and epoch_i % 4 == 0: #save model every 4 epochs
+                save = {
+                    "epoch": epoch_i,
+                    "model": model.state_dict(),
+                    "optimizer": optim.state_dict(),
+                    "scaler": scaler.state_dict(),
+                    "scheduler": scheduler.state_dict(),
+                    "best_loss": BestLoss,
+                    "best_acc": BestAcc,
+                }
+
+                torch.save(
+                    save, base_path + "best_unimodal{}{}.pt".format(args.save_name, epoch_i)
+                )
     f.close()

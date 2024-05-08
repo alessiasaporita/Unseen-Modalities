@@ -115,7 +115,7 @@ class EPICKitchensValidation(Dataset):
 
         csv_file_path = "epic-annotations/EPIC_100_full_val.csv"
 
-        self.sample_list = [] #list of validation samples names
+        self.sample_list = [] 
         with open(csv_file_path) as f:
             f_csv = csv.reader(f)
             for i, row in enumerate(f_csv):
@@ -204,7 +204,7 @@ class EPICKitchensValidation(Dataset):
         fbank = self._wav2fbank(audio_path)
 
         # normalize the input for both training and test
-        if not self.audio_skip_norm: #true
+        if not self.audio_skip_norm: 
             fbank = (fbank - self.audio_norm_mean) / (self.audio_norm_std * 2)
         # skip normalization the input if you are trying to get the normalization stats.
         else:

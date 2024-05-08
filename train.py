@@ -119,6 +119,7 @@ def train_one_step(
     gc,
     deactivate_KL,
 ):
+    #with autocast():
     with torch.no_grad():
         outputs = extract_features(unimodal_models, data) #RGB = (B, 784, 768), Audio = (B, 146, 768)
 
@@ -134,20 +135,21 @@ def train_one_step(
     ) 
 
     #Audio and RGB sample indices
-    audio_indices = torch.sum(masks['Audio'].squeeze(-1), dim=-1) > 0 #(B,) -> indeces of audio samples true/false
-    rgb_indices = torch.sum(masks['RGB'].squeeze(-1), dim=-1) > 0 #(B,) -> indeces of RGB samples true/false
+    audio_indices = torch.sum(masks['Audio'].squeeze(-1), dim=-1) > 0 #(B,) 
+    rgb_indices = torch.sum(masks['RGB'].squeeze(-1), dim=-1) > 0 #(B,) 
 
     #ALIGNMENT LOSS: max similarity between average vectors of the samples and the corrisponding class tokens, ie min euclidean distance between average vectors and the class tokens
     #Audio and RGB labels
-    audio_labels = labels[audio_indices] #(number of audio samples, ), labels of audio samples
-    rgb_labels = labels[rgb_indices] #(number of rgb samples, ), labels of rgb samples
-    audio_onehot_labels = F.one_hot(audio_labels, num_classes = 3806) #(number of audio samples, 3086) 
-    rgb_onehot_labels = F.one_hot(rgb_labels, num_classes = 3806) #(number of rgb samples, 3086) 
+    audio_labels = labels[audio_indices] 
+    rgb_labels = labels[rgb_indices] 
+    audio_onehot_labels = F.one_hot(audio_labels, num_classes = 3806) 
+    rgb_onehot_labels = F.one_hot(rgb_labels, num_classes = 3806) 
+    
     #Audio and RGB distances
-    audio_sim = audio_sim[audio_indices] #(number of audio samples, 3086) 
-    rgb_sim = rgb_sim[rgb_indices] #(number of RGB samples, 3086)
-    audio_sim = torch.sum(audio_sim * audio_onehot_labels, dim=-1) #(number of audio samples, ) 
-    rgb_sim = torch.sum(rgb_sim * rgb_onehot_labels, dim=-1) #(number of RGB samples, )
+    audio_sim = audio_sim[audio_indices] 
+    rgb_sim = rgb_sim[rgb_indices] 
+    audio_sim = torch.sum(audio_sim * audio_onehot_labels, dim=-1) 
+    rgb_sim = torch.sum(rgb_sim * rgb_onehot_labels, dim=-1) 
 
     alignment_loss = (torch.sum(audio_sim) + torch.sum(rgb_sim)) / (torch.sum(audio_indices) + torch.sum(rgb_indices))
 
@@ -160,14 +162,15 @@ def train_one_step(
         audio_pseudo = audio_pseudo[audio_indices]
         rgb_pseudo = rgb_pseudo[rgb_indices]
         probs = torch.softmax(outputs[:,1], dim=-1)
-        audio_prob = probs[audio_indices] #(number of audio samples, 3086) 
-        rgb_prob = probs[rgb_indices] #(number of rgb samples, 3086) 
+        audio_prob = probs[audio_indices] 
+        rgb_prob = probs[rgb_indices] 
         kl_loss = torch.mean(kl_loss_fn(torch.log(audio_prob), audio_pseudo)) * torch.sum(audio_indices) + torch.mean(kl_loss_fn(torch.log(rgb_prob), rgb_pseudo)) * torch.sum(rgb_indices)
         
         #Total loss
         output_loss = loss = loss_fn(outputs[:,0], labels) + kl_loss / labels.size()[0] * 3000 +  0.001 * alignment_loss
     
     loss = loss / gc
+    #end of autocast
     scaler.scale(loss).backward()
 
     if((indice + 1) % gc == 0) or (indice + 1 == last_indice):
@@ -189,6 +192,7 @@ def val_one_step(
     loss_fn,
     gc,
 ):
+    #with autocast():
     with torch.no_grad():
         outputs = extract_features(unimodal_models, data)
 
@@ -329,7 +333,7 @@ if __name__ == "__main__":
     """
     Multimodal Transfomer
     """
-    multimodal_model = ViT(
+    multimodal_model = ViT( #Total number of trainable parameters: 5.841.630 -> 6.239.454 = 6M
         num_classes=3806,
         dim=256,
         depth=6,
@@ -343,7 +347,7 @@ if __name__ == "__main__":
     """
     Feature projection: project unimodal embeddings into a common feature space (K^m, d^m)-dim
     """
-    reorganization_module = ViTReorganization(
+    reorganization_module = ViTReorganization( #Total number of trainable parameters: 10.759.680 -> 10.361.856 = 10M
         dim=256,
         depth=6,
         heads=8,
@@ -356,7 +360,7 @@ if __name__ == "__main__":
     """
     Alignment: align embeddings with learnable class tokens 
     """
-    alignment_model = AlignmentModule() 
+    alignment_model = AlignmentModule() #Total number of trainable parameters: 974.336 = 0.97M
     alignment_model = torch.nn.DataParallel(alignment_model)
     alignment_model = alignment_model.to(device)
 
@@ -511,9 +515,8 @@ if __name__ == "__main__":
 
             scheduler.step()
             wandb.log({"train/lr": scheduler.get_last_lr()[0]}) #epoch lr
-            wandb.log({"train/lr_epoch": epoch_i})
 
-            if acc / float(count) > BestAcc or (args.save_all and epoch_i % 4 == 0): #save model every 4 epochs
+            if acc / float(count) > BestAcc: 
                 BestLoss = total_loss / float(count)
                 BestEpoch = epoch_i
                 BestAcc = acc / float(count)
@@ -531,5 +534,19 @@ if __name__ == "__main__":
 
                 torch.save(
                     save, base_path + "best_multimodal{}{}.pt".format(args.save_name, epoch_i)
-                )     
+                ) 
+            if args.save_all and epoch_i % 4 == 0: #save model every 4 epochs
+                save = {
+                    "epoch": epoch_i,
+                    "model": model.state_dict(),
+                    "optimizer": optim.state_dict(),
+                    "scaler": scaler.state_dict(),
+                    "scheduler": scheduler.state_dict(),
+                    "best_loss": BestLoss,
+                    "best_acc": BestAcc,
+                }
+
+                torch.save(
+                    save, base_path + "best_unimodal{}{}.pt".format(args.save_name, epoch_i)
+                )    
     f.close()

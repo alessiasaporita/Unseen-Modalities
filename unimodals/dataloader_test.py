@@ -232,18 +232,14 @@ class EPICKitchensTest(Dataset):
         output_data = {"Audio": None, "RGB": None}
         if "Audio" in available_modalities:
             output_data["Audio"] = self.get_fbank(index) #(num_of_fbanks, 128, 128)
-            audio_mask = np.ones((self.num_position, 1))
         else:
             output_data["Audio"] = torch.rand(128, 128)
-            audio_mask = np.zeros((self.num_position, 1))
 
         # -------------------------------------------------- RGB -------------------------------------------
         if "RGB" in available_modalities:
             output_data['RGB'] = self.get_rgb_frames(index).unsqueeze(0) #[1, 3, 32, 224, 224]
-            rgb_mask = np.ones((self.num_position, 1))
         else:
             output_data['RGB'] = torch.rand(1, self.num_frames, 224, 224) #why 1 instead of 3???
-            rgb_mask = np.zeros((self.num_position, 1))
 
         action_label = self.get_label(index)
 
@@ -258,12 +254,8 @@ class EPICKitchensTest(Dataset):
             
         new_output_data['RGB'] = torch.cat(new_output_data['RGB'], dim=0) #(num_of_fbanks, 3, 32, 224, 224)
         new_output_data['Audio'] = torch.cat(new_output_data['Audio'], dim=0) #(num_of_fbanks, 128, 128)
-        
-        rgb_mask = np.ones((new_output_data['RGB'].size()[0], self.num_position, 1)) #(num_of_fbanks, 512, 1)
-        audio_mask = np.ones((new_output_data['RGB'].size()[0], self.num_position, 1)) #(num_of_fbanks, 512, 1)
-        flow_mask = np.zeros((new_output_data['RGB'].size()[0], self.num_position, 1))
 
-        return new_output_data["RGB"], new_output_data["Audio"], action_label, rgb_mask.astype(np.float32), audio_mask.astype(np.float32)
+        return new_output_data["RGB"], new_output_data["Audio"], action_label
 
     def __len__(self):
         return len(self.data)

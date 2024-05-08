@@ -1,40 +1,85 @@
-For the pseudo-labels used to train the second branch, we average the unimodal predictions across training epochs to get
-modality-specific pseudo-labels
+"Our method is trained with 120 epochs on video classification with a learning rate of 10−4, reduced to 10−5 for the last 50
+epochs."
 
-We obtain the pseudo-labels by averaging the predictions from the last e epochs of the pretrained unimodal encoders. For video
-classification, e=10.
+"Since our feature projection module introduces additional parameters over a vanilla multimodal transformer, we reduce the number
+of parameters from 14.4M to 7.2M, which is equal to the number used in a vanilla multimodal transformer."
 
-Our method is trained with 120 epochs on video classification with a learning rate of 10−4, reduced to 10−5 for the last 50
-epochs.
+multimodal_model:       Total number of trainable parameters: 5.841.630 -> 6.239.454 = 6M
+reorganization_module:  Total number of trainable parameters: 10.759.680 -> 10.361.856 = 10M
+alignment_model:        Total number of trainable parameters: 974.336 = 0.97M
 
+Total number of parameters: 16601310 + alignment_model
 
-Note that our proposed feature projection and dual branch prediction are added on top of a
-vanilla multimodal transformer. Feature projection + Dual branch prediction contribute to performance improvement for unseen
-modality combinations and the improvement over a vanilla transformer is considerable.y
+REVIEW:
+EXPLANATION OF PSEUDO LABELS
+- Our intuition for the pseudo-labeling strategy is inspired by the observation that a single modality alone often cannot provide enough
+information for accurate prediction. Take the example of conducting activity recognition with audio and video modalities, the audio is 
+often less discriminative than video. For instance, the audio modality can be crucial in distinguishing that the activity is one of swimming,
+surfing or water skiing, but cannot make fine-grained distinctions. By forcing the model to predict the ground-truth activity swimming, 
+it may overfit to some unrelated features such as background noise. By using average predictions as pseudo-labels to provide a distribution 
+over classes, the model is able to incorporate the important distinguishing information while avoiding such overfitting as it allows uncertainty 
+between multiple classes. We will make this motivation clearer in the final version.
 
-We compare with: (i) Unimodal encoders which use the unimodal features of a single
+TABLE 2 QUESTIONS
+"We ablate the effectiveness of adding the alignment loss Lalign and the pseudo-supervised loss Lpseudo to the
+task-specific loss. We use our full model with both the feature projection and the dual branch
+prediction. When not using the pseudo-supervised loss, we use the same supervised loss for both
+branches."
+In the second row of Table 3, we show that when using the same supervised loss with groundtruth for both branches
+instead of the pseudo-labeling, our multimodal model suffers a 2.3% accuracy decrease. 
+
+We show the benefit in Table 2 where we compare our model and multimodal baselines, which use all available modalities, to unimodal results which use the 
+single modalities seen in training. For example, our method achieves 25.7% accuracy with RGB & audio as opposed to 18.2% using only RGB and 10.9% using only 
+audio. Furthermore, when using only RGB or audio, our method gives 19.6% and 12.3%, worse than using both modalities (25.7%). Thus,
+using a superset at inference is beneficial.
+
+"We compare with: (i) Unimodal encoders which use the unimodal features of a single
 modality with a linear layer for prediction, (ii) Late fusion which uses the average of the predictions
 from the unimodal encoders, (iii) Vanilla transformer which uses the multimodal fusion from [9]. To
 use this vanilla transformer with modality-incomplete training data, we use a series of per-modality
-learnable tokens in place of the missing modality.
+learnable tokens in place of the missing modality."
 
 
                         Lalign      Lpseudo     RGB&Audio
 RGB                                             18.2
 Audio                                           10.9
 
+Late fusion                                     20.2
 Vanilla transformer                             19.3
 
                                                 22.1
 Feature projection      ✓                       23.5 (+4.2)
 +Dual-branch            ✓           ✓          25.7 (++2.2)
 
-We ablate the effectiveness of adding the alignment loss Lalign and the pseudo-supervised loss Lpseudo to the
-task-specific loss. We use our full model with both the feature projection and the dual branch
-prediction. When not using the pseudo-supervised loss, we use the same supervised loss for both
-branches.
+
+we only have one modality for each training sample (e.g., either RGB only or audio). However, we have two modalities 
+(the unseen modality combination) during inference. For each column, we consider two different modalities to study the 
+unseen modality combination at inference. While each video sample in EPIC-Kitchens contains all the three modalities, 
+we divide the original training set into two splits and let only one modality be available in each split during training.
+We leave the test set as is. For example, for the RGB & Audio column, one training split has RGB available only and the 
+other training split has audio available only. During inference, both of the two modalities are available.
+
+We train an unimodal encoder on each split for the video classification task. The performance of these unimodal encoders
+are reported in the three rows of the `unimodal’ part in Table 2. For the multimodal part in Table 2, the late fusion indicates
+we directly average the predictions from the unimodal encoders of the two modalities during inference. For the rest of the multimodal
+approaches, we send a single modality into each variant of our multimodal model during training while we send both modalities into
+the model at inference time.
 
 
-Since our feature projection module introduces additional
-parameters over a vanilla multimodal transformer, we reduce the number of parameters from 14.4M to 7.2M, 
-which is equal to the number used in a vanilla multimodal transformer.
+OTHER OBSERVATIONS
+- We project the features of different modalities into the same space by the alignment loss before fusing them via a sum.
+
+- Specifically, we modify the training set of EPIC-Kitchens by dividing the training data into two splits with each split having a different set of modalities.
+
+
+PSEUDO LABELS:
+""For the pseudo-labels used to train the second branch, we average the unimodal predictions across training epochs to get
+modality-specific pseudo-labels""
+QUESTIONS:
+What exactly does "average across training epochs" mean? Since we need the pseudo-labels during training,
+do we just average the first-branch prediction on this data point from each previous epoch? How do we obtain this for the first epoch?
+
+ANSWER:
+We obtain the pseudo-labels by averaging the predictions from the last e epochs of the pretrained unimodal encoders. For video classification 
+e=10, for robot state regression e=20 and for multimedia retrieval e=20. 
+

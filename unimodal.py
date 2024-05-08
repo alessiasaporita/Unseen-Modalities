@@ -10,7 +10,7 @@ import numpy as np
 import torch.nn as nn
 import random
 import warnings
-from torch.cuda.amp import GradScaler
+from torch.cuda.amp import GradScaler, autocast
 import torch.nn.functional as F
 from ast_configs import get_audio_configs
 from unimodals.omnivore_model import omnivore_swinT
@@ -55,14 +55,12 @@ class LabelSmoothLoss(nn.Module):
     def __init__(self, smoothing=0.0):
         super(LabelSmoothLoss, self).__init__()
         self.smoothing = smoothing #0.1
-
+    
     def forward(self, input, target):
-        log_prob = F.log_softmax(input, dim=-1) #class probabilities
-        #tensor of the same shape as the input with values equal to self.smoothing / (input.size(-1) - 1.0)
+        log_prob = F.log_softmax(input, dim=-1)
         weight = input.new_ones(input.size()) * self.smoothing / (input.size(-1) - 1.0)
-        #For the target class, it sets the value to 1.0 - self.smoothing.
         weight.scatter_(-1, target.unsqueeze(-1), (1.0 - self.smoothing))
-        loss = (-weight * log_prob).sum(dim=-1).mean() #cross-entropy loss
+        loss = (-weight * log_prob).sum(dim=-1).mean()
         return loss
 
 
@@ -92,7 +90,7 @@ if __name__ == "__main__":
     ) #1e-1, ...
     parser.add_argument(
         "--modality", type=str, help="audio or rgb", default="rgb",
-    ) #1e-1, ...
+    ) 
     parser.add_argument(
         "--resume_training", type=bool, help="resume training or not", default=False
     )
@@ -141,7 +139,7 @@ if __name__ == "__main__":
     device = "cuda"  # or 'cpu'
     device = torch.device(device)
 
-    base_path = "checkpoints/"
+    base_path = "/work/tesi_asaporita/UnseenModalities/checkpoints/"
     if not os.path.exists(base_path):
         os.mkdir(base_path)
 
@@ -167,13 +165,13 @@ if __name__ == "__main__":
             imagenet_pretrain=False,
             audioset_pretrain=False,
             model_size="base384",
-        ) 
+        ) #Total number of trainable parameters: 89.833.390 = 89M
     else:
     #rgb
         model = omnivore_swinT(pretrained=True) 
         model.heads = nn.Sequential(
             nn.Dropout(p=0.5), nn.Linear(in_features=768, out_features=3806, bias=True)
-        )
+        ) #Total number of trainable parameters: 30.780.644=30M
         model.multimodal_model = False
 
     model = model.to(device)
@@ -204,19 +202,18 @@ if __name__ == "__main__":
     if args.resume_training: 
         print('Restoring checkpoint')
         checkpoint = torch.load(args.resume_checkpoint)
+        model.load_state_dict(checkpoint["model"])
         optim.load_state_dict(checkpoint['optimizer'])
-        scaler.load_state_dict(checkpoint['scaler']) 
+        scaler.load_state_dict(checkpoint['scaler']) ######
         scheduler.load_state_dict(checkpoint['scheduler'])
         initial_epoch = checkpoint['epoch'] + 1
         BestLoss = checkpoint['best_loss']
         BestAcc = checkpoint['best_acc']
-        model.load_state_dict(checkpoint["model"])
-
-
+        
     train_loader = torch.utils.data.DataLoader(
         EPICKitchensTrain(
             audio_conf=train_audio_configs,
-            modality=args.modality,
+            modality=args.modality, ######
             split="train",
             audio_data_path = args.audio_data_path,
             rgb_data_path = args.rgb_data_path,
@@ -265,8 +262,8 @@ if __name__ == "__main__":
                             data = data['RGB'].cuda()
                         else:
                             data = data['Audio'].cuda()
-
-                        output = model(data) #(B, 768)                    
+                        
+                        output = model(data) #(B, 3086)                    
                         loss = loss_fn(output, labels)
                         wandb.log({"{}/step_loss".format(split): loss}) #step loss
                         total_loss += loss.item() * batch_size
@@ -284,8 +281,7 @@ if __name__ == "__main__":
                             save_pseudo_labels(output, keys, args.modality)
 
 
-                        outputs = torch.softmax(output, dim=-1) #(B, 2, 3086)
-                        #outputs = torch.mean(outputs, dim=1) #(B, 1, 3086) = mean of the predictions of the two CLS tokens 
+                        outputs = torch.softmax(output, dim=-1) #(B, 3086)
                         _, predict = torch.max(outputs, dim=1)
                         acc1 = (predict == labels).sum().item()
                         acc += int(acc1)
@@ -309,10 +305,24 @@ if __name__ == "__main__":
             wandb.log({"train/lr": scheduler.get_last_lr()[0]}) #epoch lr
             #wandb.log({"train/lr_epoch": epoch_i})
 
-            if acc / float(count) > BestAcc or (args.save_all and epoch_i % 4 == 0): #save model every 4 epochs
+            if acc / float(count) > BestAcc: 
                 BestLoss = total_loss / float(count)
                 BestEpoch = epoch_i
                 BestAcc = acc / float(count)
+                save = {
+                    "epoch": epoch_i,
+                    "model": model.state_dict(),
+                    "optimizer": optim.state_dict(),
+                    "scaler": scaler.state_dict(),
+                    "scheduler": scheduler.state_dict(),
+                    "best_loss": BestLoss,
+                    "best_acc": BestAcc,
+                }
+
+                torch.save(
+                    save, base_path + "best_unimodal{}{}.pt".format(args.save_name, epoch_i)
+                )
+            if args.save_all and epoch_i % 4 == 0: #save model every 4 epochs
                 save = {
                     "epoch": epoch_i,
                     "model": model.state_dict(),

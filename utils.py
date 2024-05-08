@@ -1,7 +1,6 @@
 def print_network(net):
     num_params = 0
     num_params_train = 0
-    print(net)
     
     for param in net.parameters():
         n = param.numel()
