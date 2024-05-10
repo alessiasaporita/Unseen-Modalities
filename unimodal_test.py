@@ -1,6 +1,6 @@
 import torch
-from dataloader_test import EPICKitchensTest
-from ast_model import ASTModel
+from unimodals.dataloader_test import EPICKitchensTest
+from unimodals.ast_model import ASTModel
 import pdb
 import torch
 import argparse
@@ -10,16 +10,11 @@ import numpy as np
 import torch.nn as nn
 import random
 import warnings
-from torch.cuda.amp import GradScaler
 import torch.nn.functional as F
 import datetime
 from ast_configs import get_audio_configs
-from omnivore_models.omnivore_model import omnivore_swinB_imagenet21k, omnivore_swinT
+from unimodals.omnivore_model import omnivore_swinB_imagenet21k, omnivore_swinT
 
-
-from train import spatialtemporal2tokens
-
-#os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -45,10 +40,13 @@ if __name__ == "__main__":
         "--modality", type=str, help="audio or rgb", default="rgb",
     ) 
     parser.add_argument(
-        "--save_name", type=str, help="name to save the predictions", default="1e4",
+        "--resume_checkpoint",
+        type=str,
+        help="path to the checkpoint",
+        default="checkpoints/best.pt",
     )
     parser.add_argument(
-        "--resume_checkpoint", type=str, help="path to the checkpoint file", default="checkpoints/best_multimodal_KL",
+        "--save_name", type=str, help="name to save the predictions", default="1e4",
     )
     args = parser.parse_args()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -69,16 +67,15 @@ if __name__ == "__main__":
             audioset_pretrain=False,
             model_size="base384",
         )
-        model = nn.DataParallel(model)
-        checkpoint = torch.load("checkpoints/audio.pt")
     else:
-        model = omnivore_swinT(pretrained=False) #changed
+        model = omnivore_swinT(pretrained=False) 
         model.heads = nn.Sequential(
             nn.Dropout(p=0.5), nn.Linear(in_features=768, out_features=3806, bias=True)
         )
         model.multimodal_model = False
-        model = torch.nn.DataParallel(rgb_model)
-        checkpoint = torch.load("checkpoints/rgb.pt")
+
+    model = torch.nn.DataParallel(model)
+    checkpoint = torch.load(args.resume_checkpoint)
     model.load_state_dict(checkpoint['model'])
     model = model.to(device)
     model.eval()
@@ -106,22 +103,22 @@ if __name__ == "__main__":
             rgb_data = rgb_data.squeeze(0) #(B, num_of_fbanks, 3, 32, 224, 224)->(num_of_fbanks, 3, 32, 224, 224)
 
             output_predictions = []
-            with torch.no_grad(): #consider multimodal prediction for 5 fbanks and rgb at a time
-                for k in range(audio.size()[0] // num1 + 1): #num_of_fbanks // 5 + 1 
+            with torch.no_grad(): 
+                for k in range(audio.size()[0] // num1 + 1): 
                     if k*num1 >= audio.size()[0]: 
                         break
                     if args.modality=='audio':
                         audio = audio.cuda()
-                        outputs = model(audio[k*num1:(k+1)*num1]) # [num_of_fbanks, 146, 768] --> audio[k*num1:(k+1)*num1] = audio[0:5]->audio[5:10]...
+                        outputs = model(audio[k*num1:(k+1)*num1]) # [num_of_fbanks, 146, 768] --> audio[0:5]->audio[5:10]...
                     else:
                         rgb_data = rgb_data.cuda()
                         outputs = model(rgb_data[k*num1:(k+1)*num1]) #[num_of_fbanks, 784, 16, 7, 7]
             
-                    outputs = torch.softmax(outputs, dim=-1) #(num_of_fbanks, 2, 3086)
+                    outputs = torch.softmax(outputs, dim=-1) #(num_of_fbanks, 3086)
                     output_predictions.append(outputs.detach())
 
             predictions = torch.cat(output_predictions, dim=0) #(num_of_fbanks * (num_of_fbanks//5+1), 2, 3086)
-            predictions = torch.mean(predictions, dim=0) #(2, 3086)
+            #predictions = torch.mean(predictions, dim=0) #(1, 3086)
             predictions = predictions.detach().cpu().numpy()
             action_label = action_label.numpy()[0]
 

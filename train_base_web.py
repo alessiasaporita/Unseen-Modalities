@@ -214,10 +214,15 @@ if __name__ == "__main__":
     loss_fn = LabelSmoothLoss(smoothing=0.1) #loss supervised
     loss_fn = loss_fn.cuda()
 
-   
+    """
+    optim = torch.optim.Adam(
+        list(multimodal_model.parameters())+list(reorganization_module.parameters()), lr=args.lr, betas=(0.9, 0.98), eps=1e-6, weight_decay=0.2
+    )
+    """
     optim = torch.optim.SGD(
         list(multimodal_model.parameters())+list(reorganization_module.parameters()), lr=args.lr, momentum=0.9, weight_decay=5e-4
     )
+
     scheduler = MultiStepLR(optim, milestones=[70], gamma=0.1)
     scaler = GradScaler()
     BestLoss = float("inf")

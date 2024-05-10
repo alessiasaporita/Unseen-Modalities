@@ -5,7 +5,6 @@ import random
 import numpy as np
 import csv
 import os
-#from  torchvision.transforms import _functional_tensor
 from pytorchvideo.transforms import (
     ApplyTransformToKey,
     ShortSideScale,
@@ -15,7 +14,6 @@ from torchvision.transforms._transforms_video import NormalizeVideo
 from transforms import SpatialCrop, TemporalCrop
 from randomerasing import RandomErasing
 from rand_auto_aug import RandAugment
-#from mmaction.datasets.pipelines import Compose
 from PIL import Image
 
 
@@ -83,7 +81,6 @@ class EPICKitchensTrain(Dataset):
         self.deactivate_KL = deactivate_KL
 
         self.get_audio_parameters()
-
         self.num_frames = 32
         self.video_transform = ApplyTransformToKey(
             key="video",

@@ -18,9 +18,6 @@ import wandb
 import os
 from torch.optim.lr_scheduler import MultiStepLR
 
-"""
-    https://github.com/gerasmark/Reproducing-Unseen-Modality-Interaction/blob/main/main.ipynb
-"""
 
 def save_pseudo_labels(outputs, keys, modality):
     detached_outputs = outputs.detach().cpu()
@@ -165,27 +162,18 @@ if __name__ == "__main__":
             imagenet_pretrain=False,
             audioset_pretrain=False,
             model_size="base384",
-        ) #Total number of trainable parameters: 89.833.390 = 89M
+        ) 
     else:
     #rgb
         model = omnivore_swinT(pretrained=True) 
         model.heads = nn.Sequential(
             nn.Dropout(p=0.5), nn.Linear(in_features=768, out_features=3806, bias=True)
-        ) #Total number of trainable parameters: 30.780.644=30M
+        ) 
         model.multimodal_model = False
 
     model = model.to(device)
     model = nn.DataParallel(model)
-    """
-    params=[]
-    head_names = ["module.mlp_head.0.weight", "module.mlp_head.0.bias", "module.mlp_head.1.weight", "module.mlp_head.1.bias", "module.heads.1.weight", "module.heads.1.bias"]
-    for name, param in model.named_parameters():
-        if name not in head_names:
-            param.requires_grad = False
-        else:
-            param.requires_grad = True
-            params.append(param)  
-    """
+    
     loss_fn = LabelSmoothLoss(smoothing=0.1) #loss supervised
     loss_fn = loss_fn.cuda()
 

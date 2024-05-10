@@ -10,7 +10,6 @@ import numpy as np
 import torch.nn as nn
 import random
 import warnings
-from torch.cuda.amp import GradScaler
 import torch.nn.functional as F
 import datetime
 from ast_configs import get_audio_configs
@@ -19,7 +18,6 @@ from vit import ViT
 from feature_reorganization import ViTReorganization
 from train import spatialtemporal2tokens
 
-#os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

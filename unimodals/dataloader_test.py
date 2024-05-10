@@ -66,10 +66,6 @@ class EPICKitchensTest(Dataset):
             ),
         )
 
-        #test_pipeline = cfg.data.test.pipeline
-        #self.test_pipeline = Compose(test_pipeline)
-        #self.cfg = cfg
-
         verb_dict = get_verb_classes()
         noun_dict = get_noun_classes()
 

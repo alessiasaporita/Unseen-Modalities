@@ -167,7 +167,7 @@ class EPICKitchensValidation(Dataset):
     def _wav2fbank(
         self,
         filename,
-        filename2=None,
+        filename2=None, #copiato dal github originale e non tolto
     ):
         waveform, sr = torchaudio.load(filename)
         waveform = waveform - waveform.mean()

@@ -18,19 +18,16 @@ import wandb
 import os
 from torch.optim.lr_scheduler import MultiStepLR
 
-"""
-    https://github.com/gerasmark/Reproducing-Unseen-Modality-Interaction/blob/main/main.ipynb
-"""
 
-def save_pseudo_labels(outputs, keys, modality):
+def save_pseudo_labels(outputs, keys, modality, audio_pseudo_path, rgb_pseudo_path):
     detached_outputs = outputs.detach().cpu()
-    detached_outputs = F.softmax(detached_outputs, dim=-1) 
+    detached_outputs = torch.softmax(detached_outputs, dim=-1) 
 
     #For each sample in the batch, save its relative prediction
     for i in range(len(keys)): 
         #------------RGB------------
         if modality=='rgb': #RGB 
-            save_path = "/work/tesi_asaporita/UnseenModalities/rgb_pseudo/{}.npy".format(keys[i])
+            save_path = rgb_pseudo_path + "/{}.npy".format(keys[i])
             if os.path.exists(save_path): #predictions for i-th sample 
                 rgb_pseudo = np.load(save_path)
                 if rgb_pseudo.shape[0]>=40:
@@ -38,10 +35,10 @@ def save_pseudo_labels(outputs, keys, modality):
                 rgb_pseudo = np.concatenate((rgb_pseudo, detached_outputs[i].unsqueeze(0).numpy()))
             else:
                 rgb_pseudo=detached_outputs[i].unsqueeze(0).numpy()
-            np.save("/work/tesi_asaporita/UnseenModalities/rgb_pseudo/{}.npy".format(keys[i]), rgb_pseudo)
+            np.save(save_path, rgb_pseudo)
         #------------Audio------------
         else: #Audio 
-            save_path = "/work/tesi_asaporita/UnseenModalities/audio_pseudo2/{}.npy".format(keys[i])
+            save_path = audio_pseudo_path + "/{}.npy".format(keys[i])
             if os.path.exists(save_path):
                 audio_pseudo = np.load(save_path)
                 if audio_pseudo.shape[0]>=40:
@@ -49,7 +46,7 @@ def save_pseudo_labels(outputs, keys, modality):
                 audio_pseudo = np.concatenate((audio_pseudo, detached_outputs[i].unsqueeze(0).numpy()))
             else:
                 audio_pseudo=detached_outputs[i].unsqueeze(0).numpy()
-            np.save("/work/tesi_asaporita/UnseenModalities/audio_pseudo2/{}.npy".format(keys[i]), audio_pseudo)
+            np.save(save_path, audio_pseudo)
 
 class LabelSmoothLoss(nn.Module):
     def __init__(self, smoothing=0.0):
@@ -121,7 +118,7 @@ if __name__ == "__main__":
 
     wandb.init(
         project="Unseen_Modalities Baseline",
-        name='Unimodal',
+        name='Audio',
         config={
         "modality":args.modality,
         "learning_rate": args.lr,
@@ -141,9 +138,16 @@ if __name__ == "__main__":
     device = "cuda"  # or 'cpu'
     device = torch.device(device)
 
-    base_path = "/work/tesi_asaporita/UnseenModalities/checkpoints/"
-    if not os.path.exists(base_path):
-        os.mkdir(base_path)
+    base_path = "/work/tesi_asaporita/UnseenModalities/{}".format(args.modality)
+    check_path = os.path.join(base_path, "checkpoints")
+    audio_pseudo_path = os.path.join(base_path, "audio_pseudo")
+    rgb_pseudo_path = os.path.join(base_path, "rgb_pseudo")
+
+    if not os.path.exists(check_path):
+        os.makedirs(check_path)
+
+    if not os.path.exists(audio_pseudo_path):
+        os.makedirs(audio_pseudo_path)
 
     batch_size = args.batch_size #96
     target_length = 128
@@ -178,23 +182,18 @@ if __name__ == "__main__":
 
     model = model.to(device)
     model = nn.DataParallel(model)
-    """
-    params=[]
-    head_names = ["module.mlp_head.0.weight", "module.mlp_head.0.bias", "module.mlp_head.1.weight", "module.mlp_head.1.bias", "module.heads.1.weight", "module.heads.1.bias"]
-    for name, param in model.named_parameters():
-        if name not in head_names:
-            param.requires_grad = False
-        else:
-            param.requires_grad = True
-            params.append(param)  
-    """
+
     loss_fn = LabelSmoothLoss(smoothing=0.1) #loss supervised
     loss_fn = loss_fn.cuda()
 
-    optim = torch.optim.SGD(
-        model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4
-    )
-    scheduler = MultiStepLR(optim, milestones=[70], gamma=0.1)
+    #optim = torch.optim.SGD(
+    #    model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4
+    #)
+    optim = torch.optim.Adam(model.parameters(), lr=args.lr)
+    
+    milestones = list(range(5, args.num_epochs))
+    scheduler = MultiStepLR(optim, milestones=milestones, gamma=0.85)
+
     scaler = GradScaler()
     BestLoss = float("inf")
     initial_epoch = 0
@@ -204,13 +203,13 @@ if __name__ == "__main__":
     if args.resume_training: 
         print('Restoring checkpoint')
         checkpoint = torch.load(args.resume_checkpoint)
+        model.load_state_dict(checkpoint["model"])
         optim.load_state_dict(checkpoint['optimizer'])
         scaler.load_state_dict(checkpoint['scaler']) 
         scheduler.load_state_dict(checkpoint['scheduler'])
         initial_epoch = checkpoint['epoch'] + 1
         BestLoss = checkpoint['best_loss']
         BestAcc = checkpoint['best_acc']
-        model.load_state_dict(checkpoint["model"])
 
 
     train_loader = torch.utils.data.DataLoader(
@@ -281,7 +280,7 @@ if __name__ == "__main__":
                                 optim.zero_grad()
 
                             #Save the prediction for each sample in the batch as pseudo_labels
-                            #save_pseudo_labels(output, keys, args.modality)
+                            save_pseudo_labels(output, keys, args.modality, audio_pseudo_path, rgb_pseudo_path)
 
 
                         outputs = torch.softmax(output, dim=-1) #(B, 3086)
@@ -304,7 +303,7 @@ if __name__ == "__main__":
                     wandb.log({"{}/loss".format(split): total_loss / float(count), "{}/loss_epoch".format(split): epoch_i}) #epoch loss
                     wandb.log({"{}/acc".format(split): acc / float(count), "{}/acc_epoch".format(split): epoch_i}) #epoch accuracy 
 
-            #scheduler.step()
+            scheduler.step()
             wandb.log({"train/lr": scheduler.get_last_lr()[0]}) #epoch lr
 
             if acc / float(count) > BestAcc: #save model every 4 epochs
@@ -322,7 +321,7 @@ if __name__ == "__main__":
                 }
 
                 torch.save(
-                    save, base_path + "best_unimodal{}{}.pt".format(args.save_name, epoch_i)
+                    save, check_path + "best_unimodal{}{}.pt".format(args.save_name, epoch_i)
                 )  
             if args.save_all and epoch_i % 4 == 0:
                 save = {
@@ -336,6 +335,6 @@ if __name__ == "__main__":
                 }
 
                 torch.save(
-                    save, base_path + "best_unimodal{}{}.pt".format(args.save_name, epoch_i)
+                    save, check_path + "best_unimodal{}{}.pt".format(args.save_name, epoch_i)
                 )  
     f.close()
