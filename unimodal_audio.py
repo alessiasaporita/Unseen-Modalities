@@ -19,34 +19,23 @@ import os
 from torch.optim.lr_scheduler import MultiStepLR
 
 
-def save_pseudo_labels(outputs, keys, modality, audio_pseudo_path, rgb_pseudo_path):
+def save_pseudo_labels(outputs, keys, audio_pseudo_path):
     detached_outputs = outputs.detach().cpu()
     detached_outputs = torch.softmax(detached_outputs, dim=-1) 
 
     #For each sample in the batch, save its relative prediction
     for i in range(len(keys)): 
-        #------------RGB------------
-        if modality=='rgb': #RGB 
-            save_path = rgb_pseudo_path + "/{}.npy".format(keys[i])
-            if os.path.exists(save_path): #predictions for i-th sample 
-                rgb_pseudo = np.load(save_path)
-                if rgb_pseudo.shape[0]>=40:
-                    rgb_pseudo=rgb_pseudo[-39:]
-                rgb_pseudo = np.concatenate((rgb_pseudo, detached_outputs[i].unsqueeze(0).numpy()))
-            else:
-                rgb_pseudo=detached_outputs[i].unsqueeze(0).numpy()
-            np.save(save_path, rgb_pseudo)
         #------------Audio------------
-        else: #Audio 
-            save_path = audio_pseudo_path + "/{}.npy".format(keys[i])
-            if os.path.exists(save_path):
-                audio_pseudo = np.load(save_path)
-                if audio_pseudo.shape[0]>=40:
-                    audio_pseudo=audio_pseudo[-39:]
-                audio_pseudo = np.concatenate((audio_pseudo, detached_outputs[i].unsqueeze(0).numpy()))
-            else:
-                audio_pseudo=detached_outputs[i].unsqueeze(0).numpy()
-            np.save(save_path, audio_pseudo)
+        #Audio 
+        save_path = audio_pseudo_path + "/{}.npy".format(keys[i])
+        if os.path.exists(save_path):
+            audio_pseudo = np.load(save_path)
+            if audio_pseudo.shape[0]>=40:
+                audio_pseudo=audio_pseudo[-39:]
+            audio_pseudo = np.concatenate((audio_pseudo, detached_outputs[i].unsqueeze(0).numpy()))
+        else:
+            audio_pseudo=detached_outputs[i].unsqueeze(0).numpy()
+        np.save(save_path, audio_pseudo)
 
 class LabelSmoothLoss(nn.Module):
     def __init__(self, smoothing=0.0):
@@ -55,9 +44,7 @@ class LabelSmoothLoss(nn.Module):
 
     def forward(self, input, target):
         log_prob = F.log_softmax(input, dim=-1) #class probabilities
-        #tensor of the same shape as the input with values equal to self.smoothing / (input.size(-1) - 1.0)
         weight = input.new_ones(input.size()) * self.smoothing / (input.size(-1) - 1.0)
-        #For the target class, it sets the value to 1.0 - self.smoothing.
         weight.scatter_(-1, target.unsqueeze(-1), (1.0 - self.smoothing))
         loss = (-weight * log_prob).sum(dim=-1).mean() #cross-entropy loss
         return loss
@@ -86,9 +73,6 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--save_name", type=str, help="name to save the model", default="1e-1",
-    ) #1e-1, ...
-    parser.add_argument(
-        "--modality", type=str, help="audio or rgb", default="rgb",
     ) 
     parser.add_argument(
         "--resume_training", type=bool, help="resume training or not", default=False
@@ -120,7 +104,7 @@ if __name__ == "__main__":
         project="Unseen_Modalities Baseline",
         name='Audio',
         config={
-        "modality":args.modality,
+        "modality":'audio',
         "learning_rate": args.lr,
         "epochs": args.num_epochs,
         "batch_size": args.batch_size,
@@ -139,9 +123,8 @@ if __name__ == "__main__":
     device = torch.device(device)
 
     base_path = "/work/tesi_asaporita/UnseenModalities/{}".format(args.modality)
-    check_path = os.path.join(base_path, "checkpoints")
-    audio_pseudo_path = os.path.join(base_path, "audio_pseudo")
-    rgb_pseudo_path = os.path.join(base_path, "rgb_pseudo")
+    check_path = os.path.join(base_path, "checkpoints/")
+    audio_pseudo_path = os.path.join(base_path, "audio_pseudo_overfitting")
 
     if not os.path.exists(check_path):
         os.makedirs(check_path)
@@ -158,37 +141,24 @@ if __name__ == "__main__":
     """
     Pretrained unimodal encoders
     Audio: AST
-    RGB: SWIN-T
     """
-    if args.modality=="audio":
     #audio
-        model = ASTModel( 
-            label_dim=3806,
-            fstride=10,
-            tstride=10,
-            input_fdim=128,
-            input_tdim=target_length, #128
-            imagenet_pretrain=False,
-            audioset_pretrain=False,
-            model_size="base384",
-        ) 
-    else:
-    #rgb
-        model = omnivore_swinT(pretrained=True) 
-        model.heads = nn.Sequential(
-            nn.Dropout(p=0.5), nn.Linear(in_features=768, out_features=3806, bias=True)
-        )
-        model.multimodal_model = False
-
+    model = ASTModel( 
+        label_dim=3806,
+        fstride=10,
+        tstride=10,
+        input_fdim=128,
+        input_tdim=target_length, #128
+        imagenet_pretrain=False,
+        audioset_pretrain=False,
+        model_size="base384",
+    ) 
     model = model.to(device)
     model = nn.DataParallel(model)
 
     loss_fn = LabelSmoothLoss(smoothing=0.1) #loss supervised
     loss_fn = loss_fn.cuda()
 
-    #optim = torch.optim.SGD(
-    #    model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4
-    #)
     optim = torch.optim.Adam(model.parameters(), lr=args.lr)
     
     milestones = list(range(5, args.num_epochs))
@@ -215,7 +185,7 @@ if __name__ == "__main__":
     train_loader = torch.utils.data.DataLoader(
         EPICKitchensTrain(
             audio_conf=train_audio_configs,
-            modality=args.modality,
+            modality='audio',
             split="train",
             audio_data_path = args.audio_data_path,
             rgb_data_path = args.rgb_data_path,
@@ -259,11 +229,7 @@ if __name__ == "__main__":
                     for (i,(data, labels, keys),) in enumerate(dataloaders[split]):
                         #data = dict with RGB =(B, 3, 32, 224, 224), Audio=(B, 128, 128)
                         labels = labels.cuda() #(B, )
-
-                        if args.modality=="rgb":
-                            data = data['RGB'].cuda()
-                        else:
-                            data = data['Audio'].cuda()
+                        data = data['Audio'].cuda()
                         
                         output = model(data) #(B, 3086)                    
                         loss = loss_fn(output, labels)
@@ -280,7 +246,7 @@ if __name__ == "__main__":
                                 optim.zero_grad()
 
                             #Save the prediction for each sample in the batch as pseudo_labels
-                            save_pseudo_labels(output, keys, args.modality, audio_pseudo_path, rgb_pseudo_path)
+                            save_pseudo_labels(output, keys, audio_pseudo_path)
 
 
                         outputs = torch.softmax(output, dim=-1) #(B, 3086)
