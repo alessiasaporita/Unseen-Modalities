@@ -18,10 +18,6 @@ import math
 import os
 from torch.optim.lr_scheduler import MultiStepLR
 
-"""
-    https://github.com/gerasmark/Reproducing-Unseen-Modality-Interaction/blob/main/main.ipynb
-"""
-
 def dict_to_cuda(data):
     for key, value in data.items():
         data[key] = value.cuda()
@@ -107,18 +103,17 @@ if __name__ == "__main__":
         "--lr", type=float, help="learning rate", default=1e-1
     )  
     parser.add_argument("--batch_size", type=int, help="batch size", default=96)
-    parser.add_argument("--deactivate_KL", type=bool, help="Deactivate KL loss", default=False)
     parser.add_argument(
         "--train_data_path",
         type=str,
         help="path to train data",
-        default="/work/tesi_asaporita/UnseenModalities/webdataset_prova/epic_kitchens-training-{000..020}.tar",
+        default="/work/tesi_asaporita/UnseenModalities/webdataset/epic_kitchens-training-{000..020}.tar",
     )
     parser.add_argument(
         "--val_data_path",
         type=str,
         help="path to validation data",
-        default="/work/tesi_asaporita/UnseenModalities/webdataset_prova/epic_kitchens-validation-{000..004}.tar",
+        default="/work/tesi_asaporita/UnseenModalities/webdataset/epic_kitchens-validation-{000..004}.tar",
     )
     parser.add_argument(
         "--n_train_samples", type=int, help="number of training samples", default=62297,
@@ -165,7 +160,6 @@ if __name__ == "__main__":
         "gc": args.gc,
         "resume_checkpoint": args.resume_checkpoint,
         "resume_training": args.resume_training,
-        "deactivate_KL": args.deactivate_KL,
         }
     )
 
@@ -195,7 +189,7 @@ if __name__ == "__main__":
         num_position=args.num_position,
     )
     multimodal_model = torch.nn.DataParallel(multimodal_model)
-    multimodal_model = multimodal_model.to(device) #Total number of trainable parameters: 5.841.630 -> 6.239.454
+    multimodal_model = multimodal_model.to(device) 
 
     """
     Feature projection: project unimodal embeddings into a common feature space (K^m, d^m)-dim
@@ -208,17 +202,10 @@ if __name__ == "__main__":
         num_position=args.num_position, #512
     )
     reorganization_module = torch.nn.DataParallel(reorganization_module)
-    reorganization_module = reorganization_module.to(device) #Total number of trainable parameters: 10.759.680 -> 10.361.856
-    ##Total number of trainable parameters: 16.601.310 = 16.6M
-
+    reorganization_module = reorganization_module.to(device) 
     loss_fn = LabelSmoothLoss(smoothing=0.1) #loss supervised
     loss_fn = loss_fn.cuda()
 
-    """
-    optim = torch.optim.Adam(
-        list(multimodal_model.parameters())+list(reorganization_module.parameters()), lr=args.lr, betas=(0.9, 0.98), eps=1e-6, weight_decay=0.2
-    )
-    """
     optim = torch.optim.SGD(
         list(multimodal_model.parameters())+list(reorganization_module.parameters()), lr=args.lr, momentum=0.9, weight_decay=5e-4
     )
@@ -274,12 +261,19 @@ if __name__ == "__main__":
                     wds.split_by_node,
                 ).with_length(n)
 
-                dataloader = wds.WebLoader(ds, batch_size=batch_size, num_workers=args.workers, pin_memory=True).shuffle(1000).to_tuple("__key__", "rgb_features.pth", "rgb_mask.pth", "audio_features.pth", "audio_mask.pth", "action_label.id")
+                if split=='train':
+                    dataloader = wds.WebLoader(ds, batch_size=batch_size, num_workers=args.workers, pin_memory=True).shuffle(1000).to_tuple("__key__", "rgb_features.pth", "rgb_mask.pth", "rgb_pseudo.pth", "audio_features.pth", "audio_mask.pth", "audio_pseudo.pth", "action_label.id")
+                else:
+                    dataloader = wds.WebLoader(ds, batch_size=batch_size, num_workers=args.workers, pin_memory=True).shuffle(1000).to_tuple("__key__", "rgb_features.pth", "rgb_mask.pth", "audio_features.pth", "audio_mask.pth", "action_label.id")
                 num_batches =  math.ceil(ds.size/batch_size)
 
                 with tqdm.tqdm(total=num_batches) as pbar:
                     for (i,sample) in enumerate(dataloader):
-                        keys, rgb_features, rgb_mask, audio_features, audio_mask, action_label = sample
+                        if split=='train':
+                            keys, rgb_features, rgb_mask, rgb_pseudo, audio_features, audio_mask, audio_pseudo, action_label = sample
+                        else:
+                            keys, rgb_features, rgb_mask, audio_features, audio_mask, action_label = sample
+
                         #------------Features------------
                         rgb_features = [wds.torch_loads(item) for item in rgb_features]
                         rgb_features = torch.stack(rgb_features , dim=0)
@@ -391,7 +385,8 @@ if __name__ == "__main__":
             if args.save_all and epoch_i % 4 == 0: #save model every 4 epochs
                 save = {
                     "epoch": epoch_i,
-                    "model": model.state_dict(),
+                    "model": multimodal_model.state_dict(),
+                    "reorganization": reorganization_module.state_dict(),
                     "optimizer": optim.state_dict(),
                     "scaler": scaler.state_dict(),
                     "scheduler": scheduler.state_dict(),
@@ -400,6 +395,6 @@ if __name__ == "__main__":
                 }
 
                 torch.save(
-                    save, base_path + "best_unimodal{}{}.pt".format(args.save_name, epoch_i)
-                )
+                    save, base_path + "best_multimodal{}{}.pt".format(args.save_name, epoch_i)
+                )  
     f.close()

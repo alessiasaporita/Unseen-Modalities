@@ -152,11 +152,6 @@ class EPICKitchensTest(Dataset):
             fbanks = m(fbank)
             fbanks = fbanks.unsqueeze(0)
         elif p < 0: 
-            #it divides the excess frames into segments of the target length,
-            #but it doesnt randomly select the starting index.
-            #It always starts cutting from the beginning of the excess frames.
-            
-            # fbanks = fbank[:target_length].unsqueeze(0)
             ids = np.arange(start=0, stop=-p, step=stride)
             fbanks = []
             for id in list(ids):
@@ -170,7 +165,6 @@ class EPICKitchensTest(Dataset):
 
     def get_fbank(self, index):
         datum = self.data[index]
-        #audio_path = os.path.join(self.audio_data_path, datum[1], datum[0] + ".wav")
         audio_path = os.path.join(self.audio_data_path, datum[0] + ".wav")
         fbank = self._wav2fbank(audio_path)
 
@@ -227,31 +221,20 @@ class EPICKitchensTest(Dataset):
         available_modalities = ["RGB", "Audio"]
         output_data = {"Audio": None, "RGB": None}
         if "Audio" in available_modalities:
-            output_data["Audio"] = self.get_fbank(index) #(num_of_fbanks, 128, 128)
+            output_data["Audio"] = self.get_fbank(index)[0] 
         else:
             output_data["Audio"] = torch.rand(128, 128)
 
         # -------------------------------------------------- RGB -------------------------------------------
         if "RGB" in available_modalities:
-            output_data['RGB'] = self.get_rgb_frames(index).unsqueeze(0) #[1, 3, 32, 224, 224]
+            output_data['RGB'] = self.get_rgb_frames(index) #[3, 32, 224, 224]
         else:
-            output_data['RGB'] = torch.rand(1, self.num_frames, 224, 224) #why 1 instead of 3???
+            output_data['RGB'] = torch.rand(3, self.num_frames, 224, 224) 
 
         action_label = self.get_label(index)
 
-        num_of_fbanks = output_data["Audio"].size()[0]
-        new_output_data = {'Audio': [], 'RGB': [],}
 
-        for i in range(1):
-            rgb_clip = output_data['RGB'][i:i+1]
-            rgb_clip = torch.tile(rgb_clip, (num_of_fbanks, 1, 1, 1, 1)) #(num_of_fbanks, 3, 32, 224, 224)
-            new_output_data['RGB'].append(rgb_clip)
-            new_output_data['Audio'].append(output_data["Audio"])
-            
-        new_output_data['RGB'] = torch.cat(new_output_data['RGB'], dim=0) #(num_of_fbanks, 3, 32, 224, 224)
-        new_output_data['Audio'] = torch.cat(new_output_data['Audio'], dim=0) #(num_of_fbanks, 128, 128)
-
-        return new_output_data["RGB"], new_output_data["Audio"], action_label
+        return output_data["RGB"], output_data["Audio"], action_label
 
     def __len__(self):
         return len(self.data)

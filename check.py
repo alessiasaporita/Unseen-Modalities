@@ -67,13 +67,13 @@ if __name__ == "__main__":
         "--train_data_path",
         type=str,
         help="path to train data",
-        default="/work/tesi_asaporita/UnseenModalities/webdataset/epic_kitchens-training-{000..012}.tar",
+        default="/work/tesi_asaporita/UnseenModalities/webdataset/epic_kitchens-training-{000..020}.tar",
     )
     parser.add_argument(
         "--val_data_path",
         type=str,
         help="path to validation data",
-        default="/work/tesi_asaporita/UnseenModalities/webdataset/epic_kitchens-validation-{000..001}.tar",
+        default="/work/tesi_asaporita/UnseenModalities/webdataset/epic_kitchens-validation-{000..004}.tar",
     )
     parser.add_argument(
         "--n_train_samples", type=int, help="number of training samples", default=62297,
@@ -131,7 +131,6 @@ if __name__ == "__main__":
             audio_data_path = args.audio_data_path,
             rgb_data_path = args.rgb_data_path,
             num_position=args.num_position,
-            deactivate_KL=True,
         )
     val_dataset = EPICKitchensValidation(
             audio_conf=val_audio_configs,

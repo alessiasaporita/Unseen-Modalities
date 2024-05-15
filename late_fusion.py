@@ -37,10 +37,13 @@ if __name__ == "__main__":
         default="/path/to/EPIC-KITCHENS/",
     )
     parser.add_argument(
-        "--modality", type=str, help="audio or rgb", default="rgb",
-    ) 
+        "--resume_rgb_checkpoint",
+        type=str,
+        help="path to the checkpoint",
+        default="checkpoints/best.pt",
+    )
     parser.add_argument(
-        "--resume_checkpoint",
+        "--resume_audio_checkpoint",
         type=str,
         help="path to the checkpoint",
         default="checkpoints/best.pt",
@@ -56,29 +59,33 @@ if __name__ == "__main__":
         target_length=target_length
     )
     
-    if args.modality=="audio":
-        model = ASTModel(
-            label_dim=3806,
-            fstride=10,
-            tstride=10,
-            input_fdim=128,
-            input_tdim=target_length,
-            imagenet_pretrain=False,
-            audioset_pretrain=False,
-            model_size="base384",
-        )
-    else:
-        model = omnivore_swinT(pretrained=False) 
-        model.heads = nn.Sequential(
-            nn.Dropout(p=0.5), nn.Linear(in_features=768, out_features=3806, bias=True)
-        )
-        model.multimodal_model = False
+    audio_model = ASTModel(
+        label_dim=3806,
+        fstride=10,
+        tstride=10,
+        input_fdim=128,
+        input_tdim=target_length,
+        imagenet_pretrain=False,
+        audioset_pretrain=False,
+        model_size="base384",
+    )
+    audio_model = audio_model.to(device)
+    audio_model = nn.DataParallel(audio_model)
+    checkpoint = torch.load(args.resume_audio_checkpoint)
+    audio_model.load_state_dict(checkpoint["model"])
+    audio_model.eval()
 
-    model = torch.nn.DataParallel(model)
-    checkpoint = torch.load(args.resume_checkpoint)
-    model.load_state_dict(checkpoint['model'])
-    model = model.to(device)
-    model.eval()
+   
+    rgb_model = omnivore_swinT(pretrained=False) 
+    rgb_model.heads = nn.Sequential(
+        nn.Dropout(p=0.5), nn.Linear(in_features=768, out_features=3806, bias=True)
+    )
+    rgb_model.multimodal_model = False
+    rgb_model = torch.nn.DataParallel(rgb_model)
+    checkpoint = torch.load(args.resume_rgb_checkpoint)
+    rgb_model.load_state_dict(checkpoint['model'])
+    rgb_model = rgb_model.to(device)
+    rgb_model.eval()
 
     test_dataset = EPICKitchensTest(audio_conf=val_audio_configs, split="test", audio_data_path=args.audio_data_path, rgb_data_path=args.rgb_data_path, num_position = args.num_position)
     test_dataloader = torch.utils.data.DataLoader(
@@ -99,13 +106,11 @@ if __name__ == "__main__":
     with open(pred_path, "a") as f:
         for i, (rgb_data, audio, action_label) in enumerate(test_dataloader):
             with torch.no_grad(): 
-                if args.modality=='audio':
-                    audio = audio.cuda()
-                    outputs = model(audio)
-                else:
-                    rgb_data = rgb_data.cuda()
-                    outputs = model(rgb_data) 
-            outputs = torch.softmax(outputs, dim=-1) #(B, 3086)
+                outputs_audio = audio_model(audio) 
+                outputs_rgb = rgb_model(rgb_data) 
+                outputs = (outputs_audio + outputs_rgb) * 0.5
+                outputs = torch.softmax(outputs, dim=-1) #(B, 3086)
+
             predictions = outputs.detach().cpu().numpy()
             action_label = action_label.numpy()[0]
 

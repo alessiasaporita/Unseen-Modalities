@@ -127,7 +127,6 @@ if __name__ == "__main__":
         "--lr", type=float, help="learning rate", default=1e-1
     )  
     parser.add_argument("--batch_size", type=int, help="batch size", default=96)
-    parser.add_argument("--deactivate_KL", type=bool, help="Deactivate KL loss", default=False)
     parser.add_argument(
         "--audio_data_path",
         type=str,
@@ -179,7 +178,6 @@ if __name__ == "__main__":
         "gc": args.gc,
         "resume_checkpoint": args.resume_checkpoint,
         "resume_training": args.resume_training,
-        "deactivate_KL": args.deactivate_KL,
         }
     )
 
@@ -219,8 +217,8 @@ if __name__ == "__main__":
     ) 
     audio_model = audio_model.to(device)
     audio_model = nn.DataParallel(audio_model)
-    #checkpoint = torch.load("checkpoints/audio.pt")
-    #audio_model.load_state_dict(checkpoint["model"])
+    checkpoint = torch.load("/work/tesi_asaporita/UnseenModalities/audio3/checkpoints/audio7.pt")
+    audio_model.load_state_dict(checkpoint["model"])
     audio_model.eval() 
 
     #rgb
@@ -230,8 +228,8 @@ if __name__ == "__main__":
     )
     rgb_model.multimodal_model = False
     rgb_model = torch.nn.DataParallel(rgb_model)
-    #checkpoint = torch.load("checkpoints/rgb.pt")
-    #rgb_model.load_state_dict(checkpoint["state_dict"]) 
+    checkpoint = torch.load("/work/tesi_asaporita/UnseenModalities/checkpoints/best_unimodal_rgb65.pt")
+    rgb_model.load_state_dict(checkpoint["model"]) 
     rgb_model = rgb_model.to(device)
     rgb_model.eval()
 
@@ -301,7 +299,6 @@ if __name__ == "__main__":
             audio_data_path = args.audio_data_path,
             rgb_data_path = args.rgb_data_path,
             num_position=args.num_position,
-            deactivate_KL=args.deactivate_KL,
         ),
         batch_size=batch_size,
         shuffle=True,
@@ -428,7 +425,8 @@ if __name__ == "__main__":
             if args.save_all and epoch_i % 4 == 0: #save model every 4 epochs
                 save = {
                     "epoch": epoch_i,
-                    "model": model.state_dict(),
+                    "model": multimodal_model.state_dict(),
+                    "reorganization": reorganization_module.state_dict(),
                     "optimizer": optim.state_dict(),
                     "scaler": scaler.state_dict(),
                     "scheduler": scheduler.state_dict(),
@@ -437,6 +435,6 @@ if __name__ == "__main__":
                 }
 
                 torch.save(
-                    save, base_path + "best_unimodal{}{}.pt".format(args.save_name, epoch_i)
+                    save, base_path + "best_multimodal{}{}.pt".format(args.save_name, epoch_i)
                 )    
     f.close()

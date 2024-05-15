@@ -57,14 +57,13 @@ def save_pseudo_labels(outputs, keys, masks):
                 audio_pseudo=detached_outputs[i].unsqueeze(0).numpy()
             np.save("audio_pseudo_web/{}.npy".format(keys[i]), audio_pseudo)
 
-"""
 def get_pseudo_labels(keys, masks, deactivate_KL):
     audio_pseudo_labels = []
     rgb_pseudo_labels = []
     for i in range(len(keys)): 
         #------------Audio------------
         if masks['Audio'][i].sum()!=0: #Audio sample
-            audio_pseudo_path = "rgb_pseudo/{}.npy".format(keys[i])
+            audio_pseudo_path = "audio_pseudo/{}.npy".format(keys[i])
             if deactivate_KL or not os.path.exists(audio_pseudo_path): #for the first epoch, KL always deactive
                 audio_pseudo = torch.zeros((3806,))
             else:
@@ -75,7 +74,7 @@ def get_pseudo_labels(keys, masks, deactivate_KL):
 
         #------------RGB------------
         if masks['RGB'][i].sum()!=0: #RGB sample
-            rgs_preudo_path = "audio_pseudo/{}.npy".format(keys[i])
+            rgs_preudo_path = "rgb_pseudo/{}.npy".format(keys[i])
             if deactivate_KL or not os.path.exists(rgs_preudo_path): #for the first epoch, KL always deactive
                 rgb_pseudo = torch.zeros((3806, ))
             else:
@@ -91,7 +90,7 @@ def get_pseudo_labels(keys, masks, deactivate_KL):
     rgb_pseudo_labels = torch.stack(rgb_pseudo_labels , dim=0)
     
     return audio_pseudo_labels, rgb_pseudo_labels
-
+"""
 class LabelSmoothLoss(nn.Module):
     def __init__(self, smoothing=0.0):
         super(LabelSmoothLoss, self).__init__()
@@ -166,7 +165,7 @@ def train_one_step(
     alignment_loss = (torch.sum(audio_sim) + torch.sum(rgb_sim)) / (torch.sum(audio_indices) + torch.sum(rgb_indices))
 
     #Total Loss: L-supervised + gamma L-pseudo + alpha L-align, with gamma = 3000, alpha = 0.001 
-    if deactivate_KL or audio_pseudo.sum()==0 or rgb_pseudo.sum()==0: #if not the first epoch
+    if deactivate_KL: 
         output_loss = loss = (loss_fn(outputs[:,0], labels) + loss_fn(outputs[:,1], labels)) * 0.5 +  0.001 * alignment_loss
     else:
         #PSEUDO LOSS: mean KL-divergence between log-prob of audio and pseudo label, rgb and rgb pseudo label, multiplied for their weigths=number of rgb/audio samples
@@ -229,13 +228,13 @@ if __name__ == "__main__":
         "--train_data_path",
         type=str,
         help="path to train data",
-        default="/work/tesi_asaporita/UnseenModalities/webdataset_prova/epic_kitchens-training-{000..020}.tar",
+        default="/work/tesi_asaporita/UnseenModalities/webdataset/epic_kitchens-training-{000..020}.tar",
     )
     parser.add_argument(
         "--val_data_path",
         type=str,
         help="path to validation data",
-        default="/work/tesi_asaporita/UnseenModalities/webdataset_prova/epic_kitchens-validation-{000..004}.tar",
+        default="/work/tesi_asaporita/UnseenModalities/webdataset/epic_kitchens-validation-{000..004}.tar",
     )
     parser.add_argument(
         "--n_train_samples", type=int, help="number of training samples", default=62297,
@@ -312,7 +311,7 @@ if __name__ == "__main__":
         num_position=args.num_position,
     )
     multimodal_model = torch.nn.DataParallel(multimodal_model)
-    multimodal_model = multimodal_model.to(device) #Total number of trainable parameters: 5.841.630 -> 6.239.454 = 6M
+    multimodal_model = multimodal_model.to(device) 
 
     """
     Feature projection: project unimodal embeddings into a common feature space (K^m, d^m)-dim
@@ -325,15 +324,15 @@ if __name__ == "__main__":
         num_position=args.num_position, #512
     )
     reorganization_module = torch.nn.DataParallel(reorganization_module) 
-    reorganization_module = reorganization_module.to(device) #Total number of trainable parameters: 10.759.680 -> 10.361.856 = 10M
-    #Total number of trainable parameters: 16.601.310 = 16.6M (397.824 parameters changed)
+    reorganization_module = reorganization_module.to(device) 
+    
 
     """
     Alignment: align embeddings with learnable class tokens 
     """
     alignment_model = AlignmentModule() 
     alignment_model = torch.nn.DataParallel(alignment_model)
-    alignment_model = alignment_model.to(device) #Total number of trainable parameters: 974.336 = 0.97M
+    alignment_model = alignment_model.to(device) 
 
     loss_fn = LabelSmoothLoss(smoothing=0.1) #loss supervised
     loss_fn = loss_fn.cuda()
@@ -396,12 +395,19 @@ if __name__ == "__main__":
                     wds.split_by_node,
                 ).with_length(n)
 
-                dataloader = wds.WebLoader(ds, batch_size=batch_size, num_workers=args.workers, pin_memory=True).shuffle(1000).to_tuple("__key__", "rgb_features.pth", "rgb_mask.pth", "audio_features.pth", "audio_mask.pth", "action_label.id")
+                if split=='train':
+                    dataloader = wds.WebLoader(ds, batch_size=batch_size, num_workers=args.workers, pin_memory=True).shuffle(1000).to_tuple("__key__", "rgb_features.pth", "rgb_mask.pth", "rgb_pseudo.pth", "audio_features.pth", "audio_mask.pth", "audio_pseudo.pth", "action_label.id")
+                else:
+                    dataloader = wds.WebLoader(ds, batch_size=batch_size, num_workers=args.workers, pin_memory=True).shuffle(1000).to_tuple("__key__", "rgb_features.pth", "rgb_mask.pth", "audio_features.pth", "audio_mask.pth", "action_label.id")
                 num_batches =  math.ceil(ds.size/batch_size)
 
                 with tqdm.tqdm(total=num_batches) as pbar:
                     for (i,sample) in enumerate(dataloader):
-                        keys, rgb_features, rgb_mask, audio_features, audio_mask, action_label = sample
+                        if split=='train':
+                            keys, rgb_features, rgb_mask, rgb_pseudo, audio_features, audio_mask, audio_pseudo, action_label = sample
+                        else:
+                            keys, rgb_features, rgb_mask, audio_features, audio_mask, action_label = sample
+
                         #------------Features------------
                         rgb_features = [wds.torch_loads(item) for item in rgb_features]
                         rgb_features = torch.stack(rgb_features , dim=0)
@@ -424,18 +430,23 @@ if __name__ == "__main__":
                         }
                         masks = dict_to_cuda(masks) #dict with 'RGB'=(B, 512, 1), Audio=(B, 512, 1)
                         
-                        #------------Pseudo Labels------------
-                        keys = [s.split('__')[1] for s in keys]
-                        audio_pseudo, rgb_pseudo = get_pseudo_labels(keys, masks, args.deactivate_KL)
-                        audio_pseudo = audio_pseudo.cuda() #(3086, )
-                        rgb_pseudo = rgb_pseudo.cuda() #(3086, )
-
                         #------------Labels------------
                         labels = [int(item.decode()) for item in action_label] #(B, )
                         labels = torch.tensor(labels).cuda()
 
                         #------------Train Step------------
                         if split == "train":
+                            #------------Pseudo Labels------------
+                            #keys = [s.split('__')[1] for s in keys]
+                            #audio_pseudo, rgb_pseudo = get_pseudo_labels(keys, masks, args.deactivate_KL)
+                            rgb_pseudo = [wds.torch_loads(item) for item in rgb_pseudo] 
+                            rgb_pseudo = torch.stack(rgb_pseudo , dim=0)
+                            audio_pseudo = [wds.torch_loads(item) for item in audio_pseudo] 
+                            audio_pseudo = torch.stack(audio_pseudo , dim=0)
+
+                            audio_pseudo = audio_pseudo.cuda() #(3086, )
+                            rgb_pseudo = rgb_pseudo.cuda() #(3086, )
+
                             outputs, loss = train_one_step(
                                 data,
                                 labels,
@@ -524,15 +535,17 @@ if __name__ == "__main__":
             if args.save_all and epoch_i % 4 == 0: #save model every 4 epochs
                 save = {
                     "epoch": epoch_i,
-                    "model": model.state_dict(),
+                    "model": multimodal_model.state_dict(),
+                    "reorganization": reorganization_module.state_dict(),
+                    "alignment": alignment_model.state_dict(),
                     "optimizer": optim.state_dict(),
-                    "scaler": scaler.state_dict(),
-                    "scheduler": scheduler.state_dict(),
+                    "scaler": scaler.state_dict(), ####
+                    "scheduler": scheduler.state_dict(), ####
                     "best_loss": BestLoss,
                     "best_acc": BestAcc,
                 }
 
                 torch.save(
-                    save, base_path + "best_unimodal{}{}.pt".format(args.save_name, epoch_i)
-                )   
+                    save, base_path + "best_multimodal{}{}.pt".format(args.save_name, epoch_i)
+                )  
     f.close()

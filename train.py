@@ -119,7 +119,7 @@ def train_one_step(
     gc,
     deactivate_KL,
 ):
-    #with autocast():
+
     with torch.no_grad():
         outputs = extract_features(unimodal_models, data) #RGB = (B, 784, 768), Audio = (B, 146, 768)
 
@@ -155,7 +155,7 @@ def train_one_step(
 
     #Total Loss: L-supervised + gamma L-pseudo + alpha L-align, with gamma = 3000, alpha = 0.001 
 
-    if deactivate_KL or audio_pseudo.sum()==0 or rgb_pseudo.sum()==0: #if not the first epoch
+    if deactivate_KL: 
         output_loss = loss = (loss_fn(outputs[:,0], labels) + loss_fn(outputs[:,1], labels)) * 0.5 +  0.001 * alignment_loss
     else:
         #PSEUDO LOSS: mean KL-divergence between log-prob of audio and pseudo label, rgb and rgb pseudo label, multiplied for their weigths=number of rgb/audio samples
@@ -170,7 +170,6 @@ def train_one_step(
         output_loss = loss = loss_fn(outputs[:,0], labels) + kl_loss / labels.size()[0] * 3000 +  0.001 * alignment_loss
     
     loss = loss / gc
-    #end of autocast
     scaler.scale(loss).backward()
 
     if((indice + 1) % gc == 0) or (indice + 1 == last_indice):
@@ -192,7 +191,6 @@ def val_one_step(
     loss_fn,
     gc,
 ):
-    #with autocast():
     with torch.no_grad():
         outputs = extract_features(unimodal_models, data)
 
@@ -309,9 +307,9 @@ if __name__ == "__main__":
     ) 
     audio_model = audio_model.to(device)
     audio_model = nn.DataParallel(audio_model)
-    #checkpoint = torch.load("checkpoints/audio.pt")
-    #audio_model.load_state_dict(checkpoint["model"])
-    audio_model.eval() #Total number of trainable parameters: 89.833.390 = 89M
+    checkpoint = torch.load("/work/tesi_asaporita/UnseenModalities/audio3/checkpoints/audio7.pt")
+    audio_model.load_state_dict(checkpoint["model"])
+    audio_model.eval() 
 
     #rgb
     rgb_model = omnivore_swinT(pretrained=True) 
@@ -320,8 +318,8 @@ if __name__ == "__main__":
     )
     rgb_model.multimodal_model = False
     rgb_model = torch.nn.DataParallel(rgb_model)
-    #checkpoint = torch.load("checkpoints/rgb.pt")
-    #rgb_model.load_state_dict(checkpoint["state_dict"]) #Total number of trainable parameters: 30.780.644=30M
+    checkpoint = torch.load("/work/tesi_asaporita/UnseenModalities/checkpoints/best_unimodal_rgb65.p")
+    rgb_model.load_state_dict(checkpoint["model"]) 
     rgb_model = rgb_model.to(device)
     rgb_model.eval()
 
@@ -401,7 +399,6 @@ if __name__ == "__main__":
             audio_data_path = args.audio_data_path,
             rgb_data_path = args.rgb_data_path,
             num_position=args.num_position,
-            deactivate_KL=args.deactivate_KL,
         ),
         batch_size=batch_size,
         shuffle=True,

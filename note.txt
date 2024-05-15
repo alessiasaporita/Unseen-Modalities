@@ -10,6 +10,9 @@ alignment_model:        Total number of trainable parameters: 974.336 = 0.97M
 
 Total number of parameters: 16601310 + alignment_model
 
+Audio_model = 89.833.390 = 89M parameters
+RGB model: 30.780.644=30M
+
 REVIEW:
 EXPLANATION OF PSEUDO LABELS
 - Our intuition for the pseudo-labeling strategy is inspired by the observation that a single modality alone often cannot provide enough
@@ -101,4 +104,11 @@ lr_config = dict(
     warmup_iters=2.5
 )
 total_epochs = 30
+
+AUDIO TRAINING ON ESC-50:
+We use an initial learning rate of 1e-4 and 1e-5 for AST-S and AST-P, respectively, and decrease 
+thelearning rate with a factor of 0.85 every epoch after the 5-th epoch.
+
+We use an initial learning rate of 2.5e-4 and decrease the learning rate with a factor of 0.85 
+every epoch after the 5-th epoch. We train the model for up to 20 epochs.
 
