@@ -35,38 +35,6 @@ def spatialtemporal2tokens(data):
     data = data.transpose(1, 2).contiguous()
     return data
 
-"""
-def save_pseudo_labels(outputs, keys, masks):
-    truth_outputs = outputs[:,0,:] #(B, 3086) = first CLS token = predictions
-    detached_outputs = truth_outputs.detach().cpu()
-    detached_outputs = torch.softmax(detached_outputs, dim=-1)
-
-    #For each sample in the batch, save its relative prediction
-    for i in range(len(keys)): 
-        #------------RGB------------
-        if masks['RGB'][i].sum()!=0: #RGB sample
-            save_path = "rgb_pseudo/{}.npy".format(keys[i])
-            if os.path.exists(save_path): #predictions for i-th sample 
-                rgb_pseudo = np.load(save_path)
-                if rgb_pseudo.shape[0]>=10:
-                    rgb_pseudo=rgb_pseudo[-9:]
-                rgb_pseudo = np.concatenate((rgb_pseudo, detached_outputs[i].unsqueeze(0).numpy()))
-            else:
-                rgb_pseudo=detached_outputs[i].unsqueeze(0).numpy()
-            np.save("rgb_pseudo/{}.npy".format(keys[i]), rgb_pseudo)
-        #------------Audio------------
-        if masks['Audio'][i].sum()!=0: #Audio sample
-            save_path = "audio_pseudo/{}.npy".format(keys[i])
-            if os.path.exists(save_path):
-                audio_pseudo = np.load(save_path)
-                if audio_pseudo.shape[0]>=10:
-                    audio_pseudo=audio_pseudo[-9:]
-                audio_pseudo = np.concatenate((audio_pseudo, detached_outputs[i].unsqueeze(0).numpy()))
-            else:
-                audio_pseudo=detached_outputs[i].unsqueeze(0).numpy()
-            np.save("audio_pseudo/{}.npy".format(keys[i]), audio_pseudo)
-
-"""
 class LabelSmoothLoss(nn.Module):
     def __init__(self, smoothing=0.0):
         super(LabelSmoothLoss, self).__init__()
@@ -318,7 +286,7 @@ if __name__ == "__main__":
     )
     rgb_model.multimodal_model = False
     rgb_model = torch.nn.DataParallel(rgb_model)
-    checkpoint = torch.load("/work/tesi_asaporita/UnseenModalities/checkpoints/best_unimodal_rgb65.p")
+    checkpoint = torch.load("/work/tesi_asaporita/UnseenModalities/checkpoints/best_unimodal_rgb73.pt")
     rgb_model.load_state_dict(checkpoint["model"]) 
     rgb_model = rgb_model.to(device)
     rgb_model.eval()

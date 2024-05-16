@@ -26,71 +26,7 @@ def dict_to_cuda(data):
     for key, value in data.items():
         data[key] = value.cuda()
     return data
-"""
-def save_pseudo_labels(outputs, keys, masks):
-    truth_outputs = outputs[:,0,:] #(B, 3086) = first CLS token = predictions
-    detached_outputs = truth_outputs.detach().cpu()
-    detached_outputs = torch.softmax(detached_outputs, dim=-1)
 
-    #For each sample in the batch, save its relative prediction
-    for i in range(len(keys)): 
-        #------------RGB------------
-        if masks['RGB'][i].sum()!=0: #RGB sample
-            save_path = "rgb_pseudo_web/{}.npy".format(keys[i])
-            if os.path.exists(save_path): #predictions for i-th sample 
-                rgb_pseudo = np.load(save_path)
-                if rgb_pseudo.shape[0]>=10:
-                    rgb_pseudo=rgb_pseudo[-9:]
-                rgb_pseudo = np.concatenate((rgb_pseudo, detached_outputs[i].unsqueeze(0).numpy()))
-            else:
-                rgb_pseudo=detached_outputs[i].unsqueeze(0).numpy()
-            np.save("rgb_pseudo_web/{}.npy".format(keys[i]), rgb_pseudo)
-        #------------Audio------------
-        if masks['Audio'][i].sum()!=0: #Audio sample
-            save_path = "audio_pseudo_web/{}.npy".format(keys[i])
-            if os.path.exists(save_path):
-                audio_pseudo = np.load(save_path)
-                if audio_pseudo.shape[0]>=10:
-                    audio_pseudo=audio_pseudo[-9:]
-                audio_pseudo = np.concatenate((audio_pseudo, detached_outputs[i].unsqueeze(0).numpy()))
-            else:
-                audio_pseudo=detached_outputs[i].unsqueeze(0).numpy()
-            np.save("audio_pseudo_web/{}.npy".format(keys[i]), audio_pseudo)
-
-def get_pseudo_labels(keys, masks, deactivate_KL):
-    audio_pseudo_labels = []
-    rgb_pseudo_labels = []
-    for i in range(len(keys)): 
-        #------------Audio------------
-        if masks['Audio'][i].sum()!=0: #Audio sample
-            audio_pseudo_path = "audio_pseudo/{}.npy".format(keys[i])
-            if deactivate_KL or not os.path.exists(audio_pseudo_path): #for the first epoch, KL always deactive
-                audio_pseudo = torch.zeros((3806,))
-            else:
-                audio_pseudo = torch.Tensor(np.load(audio_pseudo_path))
-                audio_pseudo = torch.mean(audio_pseudo, dim=0) #(3086, )
-        else: #RGB sample
-            audio_pseudo = torch.zeros((3806,))
-
-        #------------RGB------------
-        if masks['RGB'][i].sum()!=0: #RGB sample
-            rgs_preudo_path = "rgb_pseudo/{}.npy".format(keys[i])
-            if deactivate_KL or not os.path.exists(rgs_preudo_path): #for the first epoch, KL always deactive
-                rgb_pseudo = torch.zeros((3806, ))
-            else:
-                rgb_pseudo = torch.Tensor(np.load(rgs_preudo_path))
-                rgb_pseudo = torch.mean(rgb_pseudo, dim=0)
-        else: #Audio sample
-            rgb_pseudo = torch.zeros((3806, ))
-        
-        rgb_pseudo_labels.append(rgb_pseudo)
-        audio_pseudo_labels.append(audio_pseudo)
-
-    audio_pseudo_labels=torch.stack(audio_pseudo_labels, dim=0)
-    rgb_pseudo_labels = torch.stack(rgb_pseudo_labels , dim=0)
-    
-    return audio_pseudo_labels, rgb_pseudo_labels
-"""
 class LabelSmoothLoss(nn.Module):
     def __init__(self, smoothing=0.0):
         super(LabelSmoothLoss, self).__init__()
@@ -175,7 +111,13 @@ def train_one_step(
         audio_prob = probs[audio_indices]               #(number of audio samples, 3086) 
         rgb_prob = probs[rgb_indices]                   #(number of rgb samples, 3086) 
         
-        kl_loss = torch.mean(kl_loss_fn(torch.log(audio_prob), audio_pseudo)) * torch.sum(audio_indices) + torch.mean(kl_loss_fn(torch.log(rgb_prob), rgb_pseudo)) * torch.sum(rgb_indices)
+        kl_loss=0
+        if torch.sum(audio_indices) != 0:
+            kl_loss += torch.mean(kl_loss_fn(torch.log(audio_prob), audio_pseudo)) * torch.sum(audio_indices)
+        if torch.sum(rgb_indices) != 0:
+            kl_loss += torch.mean(kl_loss_fn(torch.log(rgb_prob), rgb_pseudo)) * torch.sum(rgb_indices)
+            
+        #kl_loss = torch.mean(kl_loss_fn(torch.log(audio_prob), audio_pseudo)) * torch.sum(audio_indices) + torch.mean(kl_loss_fn(torch.log(rgb_prob), rgb_pseudo)) * torch.sum(rgb_indices)
         
         #Total loss
         output_loss = loss = loss_fn(outputs[:,0], labels) + kl_loss / labels.size()[0] * 3000 +  0.001 * alignment_loss
@@ -184,9 +126,9 @@ def train_one_step(
     scaler.scale(loss).backward()
 
     if((indice + 1) % gc == 0) or (indice + 1 == last_indice):
-        optim.zero_grad()
         scaler.step(optim)
         scaler.update()
+        optim.zero_grad()
 
     return outputs, output_loss
 
