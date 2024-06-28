@@ -21,9 +21,9 @@ We download the RGB and optical flow frames from the official website of [EPIC-K
 
 * We provide the splits for training, validation and testing in the `epic-annotations` folder. 
 
-* To run the code:
+* To run the code: 
 `python train_web.py --lr 1e-4 --batch_size 96 --num_epochs 120 --save_name _KL_ --workers 16` 
 
 
-* We finetuned the model by reduced learning rates, as specified in `bash.sh`.
+* Commands for all experiments / models can be found in the file `bash.sh`.
 
