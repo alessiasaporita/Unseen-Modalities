@@ -151,8 +151,7 @@ class ViT(nn.Module): #num_classes=3806, dim=256,  depth=6, heads=8, mlp_dim=512
             nn.Linear(768, dim),
             nn.LayerNorm(dim)
         )
-        """ 
-
+        """
         per_branch = num_position // branch_num
         branch_masks = []
         for i in range(branch_num):
@@ -163,8 +162,9 @@ class ViT(nn.Module): #num_classes=3806, dim=256,  depth=6, heads=8, mlp_dim=512
             branch_mask1[:,:,:,i,i] = 1
             branch_masks.append(branch_mask1)
         self.branch_masks = torch.cat(branch_masks, dim=1) #[1, branch_num, heads, num_position, num_position]
-        self.branch_num = branch_num
+        
 
+        self.branch_num = branch_num
         self.pos_embedding = nn.Parameter(torch.randn(1, num_position + branch_num, dim)) #(1, 514, 256)
         self.cls_token = nn.Parameter(torch.randn(1, branch_num, dim)) #(1, 2, 256)
         self.dropout = nn.Dropout(emb_dropout)

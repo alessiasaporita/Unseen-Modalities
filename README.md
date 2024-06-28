@@ -1,11 +1,9 @@
-## [Learning Unseen Modality Interaction](https://arxiv.org/abs/2306.12795) (NeurIPS 2023)
+## [Reproducing Unseen Modality Interaction for video classification](https://arxiv.org/abs/2306.12795) (NeurIPS 2023)
 
 
 <img width="1595" alt="Screenshot 2024-01-22 at 16 38 34" src="https://github.com/xiaobai1217/Unseen-Modality-Interaction/assets/22721775/ecc432fb-722d-41bc-befc-4add1a5abb5d">
 
-This is the demo code for the video classification task using EPIC-Kitchens, with RGB and audio modalities. 
-
-## Demo Code
+This is the code for the video classification task using EPIC-Kitchens, with RGB and audio modalities. We analyze and try to reproduce the results of Yunhua Zhang, Hazel Doughty, Cees G.M. Snoek Learning Unseen Modality Interaction In NeurIPS, 2023. 
 
 
 ### Environment
@@ -24,7 +22,8 @@ We download the RGB and optical flow frames from the official website of [EPIC-K
 * We provide the splits for training, validation and testing in the `epic-annotations` folder. 
 
 * To run the code:
-`python train.py --lr 1e-1 --batch_size 96 --save_name 1e-1`
+`python train_web.py --lr 1e-4 --batch_size 96 --num_epochs 120 --save_name _KL_ --workers 16` 
+
 
 * We finetuned the model by reduced learning rates, as specified in `bash.sh`.
 

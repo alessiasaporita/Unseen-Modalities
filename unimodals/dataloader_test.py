@@ -221,7 +221,7 @@ class EPICKitchensTest(Dataset):
         available_modalities = ["RGB", "Audio"]
         output_data = {"Audio": None, "RGB": None}
         if "Audio" in available_modalities:
-            output_data["Audio"] = self.get_fbank(index)[0] 
+            output_data["Audio"] = self.get_fbank(index)
         else:
             output_data["Audio"] = torch.rand(128, 128)
 

@@ -160,13 +160,15 @@ class EPICKitchensTest(Dataset):
             #but it doesnt randomly select the starting index.
             #It always starts cutting from the beginning of the excess frames.
             
-            # fbanks = fbank[:target_length].unsqueeze(0)
+            fbanks = fbank[:target_length].unsqueeze(0)
+            """
             ids = np.arange(start=0, stop=-p, step=stride)
             fbanks = []
             for id in list(ids):
                 fbank1 = fbank[id : id + target_length, :]
                 fbanks.append(fbank1)
             fbanks = torch.stack(fbanks)
+            """
         else:
             fbanks = fbank.unsqueeze(0)
         
@@ -214,10 +216,7 @@ class EPICKitchensTest(Dataset):
         video_data = {}
         video_data["video"] = frames
         video_data = self.video_transform(video_data)
-        video_data = torch.stack(video_data["video"]).squeeze(
-            0
-        )
-
+        video_data = torch.stack(video_data["video"]).squeeze(0)
         return video_data
 
     def get_label(self, index):
@@ -242,11 +241,13 @@ class EPICKitchensTest(Dataset):
             output_data['RGB'] = self.get_rgb_frames(index).unsqueeze(0) #[1, 3, 32, 224, 224]
             rgb_mask = np.ones((self.num_position, 1))
         else:
-            output_data['RGB'] = torch.rand(1, self.num_frames, 224, 224) #why 1 instead of 3???
+            output_data['RGB'] = torch.rand(1, self.num_frames, 224, 224) 
             rgb_mask = np.zeros((self.num_position, 1))
 
         action_label = self.get_label(index)
-
+        
+        return output_data["RGB"], output_data["Audio"], action_label, rgb_mask.astype(np.float32), audio_mask.astype(np.float32)
+        """
         num_of_fbanks = output_data["Audio"].size()[0]
         new_output_data = {'Audio': [], 'RGB': [],}
 
@@ -264,6 +265,7 @@ class EPICKitchensTest(Dataset):
         flow_mask = np.zeros((new_output_data['RGB'].size()[0], self.num_position, 1))
 
         return new_output_data["RGB"], new_output_data["Audio"], action_label, rgb_mask.astype(np.float32), audio_mask.astype(np.float32)
+        """
 
     def __len__(self):
         return len(self.data)

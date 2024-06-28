@@ -86,6 +86,7 @@ def train_one_step(
     last_indice,
     gc,
     deactivate_KL,
+    base,
 ):
 
     with torch.no_grad():
@@ -123,10 +124,12 @@ def train_one_step(
 
     #Total Loss: L-supervised + gamma L-pseudo + alpha L-align, with gamma = 3000, alpha = 0.001 
 
-    if deactivate_KL: 
+    if base: #Supervised Loss
+        output_loss = loss = (loss_fn(outputs[:,0], labels) + loss_fn(outputs[:,1], labels)) * 0.5 
+    elif deactivate_KL: # + Align Loss
         output_loss = loss = (loss_fn(outputs[:,0], labels) + loss_fn(outputs[:,1], labels)) * 0.5 +  0.001 * alignment_loss
-    else:
-        #PSEUDO LOSS: mean KL-divergence between log-prob of audio and pseudo label, rgb and rgb pseudo label, multiplied for their weigths=number of rgb/audio samples
+    else: # + Pseudo Loss
+        #L_pseudo: mean KL-divergence between log-prob of audio and pseudo label, rgb and rgb pseudo label, multiplied for their weigths=number of rgb/audio samples
         audio_pseudo = audio_pseudo[audio_indices]
         rgb_pseudo = rgb_pseudo[rgb_indices]
         probs = torch.softmax(outputs[:,1], dim=-1)
@@ -184,6 +187,7 @@ if __name__ == "__main__":
     )  
     parser.add_argument("--batch_size", type=int, help="batch size", default=96)
     parser.add_argument("--deactivate_KL", type=bool, help="Deactivate KL loss", default=False)
+    parser.add_argument("--base", type=bool, help="Deactivate KL and alignment loss", default=False)
     parser.add_argument(
         "--audio_data_path",
         type=str,
@@ -275,7 +279,7 @@ if __name__ == "__main__":
     ) 
     audio_model = audio_model.to(device)
     audio_model = nn.DataParallel(audio_model)
-    checkpoint = torch.load("/work/tesi_asaporita/UnseenModalities/audio3/checkpoints/audio7.pt")
+    checkpoint = torch.load("/work/tesi_asaporita/UnseenModalities/audio/checkpoints/audio7.pt")
     audio_model.load_state_dict(checkpoint["model"])
     audio_model.eval() 
 
@@ -286,7 +290,7 @@ if __name__ == "__main__":
     )
     rgb_model.multimodal_model = False
     rgb_model = torch.nn.DataParallel(rgb_model)
-    checkpoint = torch.load("/work/tesi_asaporita/UnseenModalities/checkpoints/best_unimodal_rgb73.pt")
+    checkpoint = torch.load("/work/tesi_asaporita/UnseenModalities/rgb/checkpoints/best_unimodal_rgb73.pt")
     rgb_model.load_state_dict(checkpoint["model"]) 
     rgb_model = rgb_model.to(device)
     rgb_model.eval()
@@ -431,6 +435,7 @@ if __name__ == "__main__":
                                 len(dataloaders[split]),
                                 args.gc,
                                 args.deactivate_KL,
+                                args.base,
                             )
 
 
@@ -503,7 +508,7 @@ if __name__ == "__main__":
             if args.save_all and epoch_i % 4 == 0: #save model every 4 epochs
                 save = {
                     "epoch": epoch_i,
-                    "model": model.state_dict(),
+                    "model": multimodal_model.state_dict(),
                     "optimizer": optim.state_dict(),
                     "scaler": scaler.state_dict(),
                     "scheduler": scheduler.state_dict(),
