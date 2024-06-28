@@ -9,3 +9,5 @@ pretrained_models/
 dbg/
 wandb/
 utils/
+
+!bash.sh
