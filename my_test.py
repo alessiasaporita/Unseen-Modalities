@@ -110,38 +110,28 @@ if __name__ == "__main__":
     if not os.path.exists(save_path):
         os.mkdir(save_path)
     pred_path = "predictions/{}.csv".format(args.save_name)
-    num1 = 5
+
 
     with open(pred_path, "a") as f:
         for i, (rgb_data, audio, action_label, rgb_mask, audio_mask) in enumerate(test_dataloader):
-            audio = audio.cuda().squeeze(0)             #(B, num_of_fbanks, 128, 128)->(num_of_fbanks, 128, 128)
-            rgb_data = rgb_data.cuda().squeeze(0)       #(B, num_of_fbanks, 3, 32, 224, 224)->(num_of_fbanks, 3, 32, 224, 224)
-            rgb_mask = rgb_mask.cuda().squeeze(0)       #(B, num_of_fbanks, 512, 1)->(num_of_fbanks, 512, 1)
-            audio_mask = audio_mask.cuda().squeeze(0)   #(B, num_of_fbanks, 512, 1)->(num_of_fbanks, 512, 1)
+            audio = audio.cuda().squeeze(0) #(B, 128, 128)
+            rgb_data = rgb_data.cuda().squeeze(0) #(B, 3, 32, 224, 224)
 
-            output_predictions = []
-            with torch.no_grad(): #consider multimodal prediction for 5 fbanks and rgb at a time
-                for k in range(audio.size()[0] // num1 + 1):                 #num_of_fbanks // 5 + 1 
-                    if k*num1 >= audio.size()[0]: 
-                        break
-                    audio_outputs = audio_model(audio[k*num1:(k+1)*num1])    # [num_of_fbanks, 146, 768]
-                    rgb_outputs = rgb_model(rgb_data[k*num1:(k+1)*num1])     #[num_of_fbanks, 768, 16, 7, 7]
+            with torch.no_grad(): 
+                audio_outputs = audio_model(audio) # [1, 146, 768]
+                rgb_outputs = rgb_model(rgb_data)  #[1, 768, 16, 7, 7]
+                rgb_outputs = spatialtemporal2tokens(rgb_outputs)
 
-                    rgb_outputs = spatialtemporal2tokens(rgb_outputs)
+                rgb_outputs, audio_outputs = reorganization_module(rgb_outputs, audio_outputs)  #rgb = (1, 512, 768), audio =(1, 512, 768)
+                outputs = multimodal_model(rgb_outputs, audio_outputs, rgb_mask, audio_mask)    #(1, 2, 3086)
+                
+            
+            outputs = torch.softmax(outputs, dim=-1)           
+            outputs = torch.mean(outputs, dim=1)       #(B, 3086)
 
-                    rgb_outputs, audio_outputs = reorganization_module(rgb_outputs, audio_outputs)  #rgb = (num_of_fbanks, 512, 256), audio =(num_of_fbanks, 512, 768)
-                    outputs = multimodal_model(rgb_outputs, audio_outputs, rgb_mask, audio_mask)    #(num_of_fbanks, 2, 3086)
-                    
-                    outputs = torch.softmax(outputs, dim=-1)                #(num_of_fbanks, 2, 3086)
-                    output_predictions.append(outputs.detach())
-
-            predictions = torch.cat(output_predictions, dim=0)      #(num_of_fbanks, 2, 3086)
-            predictions = torch.mean(predictions, dim=0)            #(2, 3086)
-            predictions = predictions.detach().cpu().numpy()
+            predictions = outputs.detach().cpu().numpy()
             action_label = action_label.numpy()[0]
 
-            #index of the maximum value in the flattened array.
-            #This means it will return the index of the maximum value considering all elements of the array as if they were in a single, one-dimensional array.
             if np.argmax(predictions) == action_label:
                 acc += 1
             print(i+1, '/', num_of_samples, 'Accuracy:', acc / (i+1))

@@ -3,7 +3,7 @@
 
 <img width="1595" alt="Screenshot 2024-01-22 at 16 38 34" src="https://github.com/xiaobai1217/Unseen-Modality-Interaction/assets/22721775/ecc432fb-722d-41bc-befc-4add1a5abb5d">
 
-This is the demo code for the video classification task using EPIC-Kitchens, with RGB and audio modalities. 
+This is the code for the video classification task using EPIC-Kitchens, with RGB and audio modalities. We analyze and try to reproduce the results of Yunhua Zhang, Hazel Doughty, Cees G.M. Snoek Learning Unseen Modality Interaction In NeurIPS, 2023. 
 
 
 ### Environment

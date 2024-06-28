@@ -6,9 +6,9 @@ of parameters from 14.4M to 7.2M, which is equal to the number used in a vanilla
 
 multimodal_model:       Total number of trainable parameters: 5.841.630 -> 6.239.454 = 6M
 reorganization_module:  Total number of trainable parameters: 10.759.680 -> 10.361.856 = 10M
-alignment_model:        Total number of trainable parameters: 974.336 = 0.97M
+alignment_model:        Total number of trainable parameters: 974.336 = 0.97M / 2.923.008 = 2.9M (768 features)
 
-Total number of parameters: 16601310 + alignment_model
+Total number of parameters: 16.601.310 + alignment_model
 
 Audio_model = 89.833.390 = 89M parameters
 RGB model: 30.780.644=30M
@@ -52,7 +52,7 @@ Vanilla transformer                             19.3
 
                                                 22.1
 Feature projection      ✓                       23.5 (+4.2)
-+Dual-branch            ✓           ✓          25.7 (++2.2)
++Dual-branch            ✓           ✓           25.7 (++2.2)
 
 
 we only have one modality for each training sample (e.g., either RGB only or audio). However, we have two modalities 

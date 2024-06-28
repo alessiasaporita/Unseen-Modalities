@@ -106,8 +106,14 @@ if __name__ == "__main__":
     with open(pred_path, "a") as f:
         for i, (rgb_data, audio, action_label) in enumerate(test_dataloader):
             with torch.no_grad(): 
+                audio = audio.cuda().squeeze(0)
+                rgb_data = rgb_data.cuda()
+
                 outputs_audio = audio_model(audio) 
+                outputs_audio = torch.mean(outputs_audio, dim=0).unsqueeze(0)
+
                 outputs_rgb = rgb_model(rgb_data) 
+                
                 outputs = (outputs_audio + outputs_rgb) * 0.5
                 outputs = torch.softmax(outputs, dim=-1) #(B, 3086)
 

@@ -44,7 +44,7 @@ class LabelSmoothLoss(nn.Module):
 class AlignmentModule(nn.Module):
     def __init__(self, dim=256):
         super(AlignmentModule, self).__init__()
-        self.base_vectors = nn.Parameter(torch.randn(1, 3806, dim)) #(1, 3086, d*), d*=256, class tokens to be learnt 
+        self.base_vectors = nn.Parameter(torch.randn(1, 3806, dim)) #(1, 3086, d), class tokens to be learnt 
     
     def forward(self, input): # input [B, 512, 256]
         input = torch.mean(input, dim=1, keepdim=True) # [B, 1, d*], mean vectors of the samples in the batch
@@ -69,19 +69,20 @@ def train_one_step(
     last_indice,
     gc,
     deactivate_KL,
+    base,
 ):
-    rgb, audio = reorganization_module( #feature projection = (B, 512, 256) = (B, k*, d*)
+    rgb, audio = reorganization_module( #feature projection = (B, 512, 768) = (B, k*, d)
         data['RGB'], data['Audio'] 
     ) 
+
+    audio_sim = alignment_model(audio) #sim = [B, 3806]
+    rgb_sim = alignment_model(rgb) #sim = [B, 3806]
 
     outputs = multimodal_model( #(B, 2, 3086), the two CLS tokens
         rgb, audio, masks['RGB'], masks['Audio']
     ) 
 
     #ALIGNMENT LOSS: max similarity between average vectors of the samples and the corrisponding class tokens, ie min euclidean distance between average vectors and the class tokens
-    audio_sim = alignment_model(audio) #sim = [B, 3806]
-    rgb_sim = alignment_model(rgb) #sim = [B, 3806]
-
     #Audio and RGB sample indices
     audio_indices = torch.sum(masks['Audio'].squeeze(-1), dim=-1) > 0 #(B,) 
     rgb_indices = torch.sum(masks['RGB'].squeeze(-1), dim=-1) > 0 #(B,) 
@@ -100,11 +101,13 @@ def train_one_step(
     rgb_sim = torch.sum(rgb_sim * rgb_onehot_labels, dim=-1)            #(number of RGB samples, )
     alignment_loss = (torch.sum(audio_sim) + torch.sum(rgb_sim)) / (torch.sum(audio_indices) + torch.sum(rgb_indices))
 
-    #Total Loss: L-supervised + gamma L-pseudo + alpha L-align, with gamma = 3000, alpha = 0.001 
-    if deactivate_KL: 
+    #Total Loss: L-supervised + gamma L-pseudo + alpha L-align, with gamma = 3000, alpha = 0.001
+    if base: #Supervised Loss
+        output_loss = loss = (loss_fn(outputs[:,0], labels) + loss_fn(outputs[:,1], labels)) * 0.5 
+    elif deactivate_KL: # + Align Loss
         output_loss = loss = (loss_fn(outputs[:,0], labels) + loss_fn(outputs[:,1], labels)) * 0.5 +  0.001 * alignment_loss
-    else:
-        #PSEUDO LOSS: mean KL-divergence between log-prob of audio and pseudo label, rgb and rgb pseudo label, multiplied for their weigths=number of rgb/audio samples
+    else: # + Pseudo Loss
+        #L_pseudo: mean KL-divergence between log-prob of audio and pseudo label, rgb and rgb pseudo label, multiplied for their weigths=number of rgb/audio samples
         audio_pseudo = audio_pseudo[audio_indices]
         rgb_pseudo = rgb_pseudo[rgb_indices]
         probs = torch.softmax(outputs[:,1], dim=-1)
@@ -115,12 +118,12 @@ def train_one_step(
         if torch.sum(audio_indices) != 0:
             kl_loss += torch.mean(kl_loss_fn(torch.log(audio_prob), audio_pseudo)) * torch.sum(audio_indices)
         if torch.sum(rgb_indices) != 0:
-            kl_loss += torch.mean(kl_loss_fn(torch.log(rgb_prob), rgb_pseudo)) * torch.sum(rgb_indices)
+            kl_loss += torch.mean(kl_loss_fn(torch.log(rgb_prob), rgb_pseudo)) * torch.sum(rgb_indices) 
             
         #kl_loss = torch.mean(kl_loss_fn(torch.log(audio_prob), audio_pseudo)) * torch.sum(audio_indices) + torch.mean(kl_loss_fn(torch.log(rgb_prob), rgb_pseudo)) * torch.sum(rgb_indices)
         
         #Total loss
-        output_loss = loss = loss_fn(outputs[:,0], labels) + kl_loss / labels.size()[0] * 3000 +  0.001 * alignment_loss
+        output_loss = loss = loss_fn(outputs[:,0], labels) + kl_loss / labels.size()[0] * 1000 +  0.001 * alignment_loss
     
     loss = loss / gc
     scaler.scale(loss).backward()
@@ -166,6 +169,7 @@ if __name__ == "__main__":
     )  
     parser.add_argument("--batch_size", type=int, help="batch size", default=96)
     parser.add_argument("--deactivate_KL", type=bool, help="Deactivate KL loss", default=False)
+    parser.add_argument("--base", type=bool, help="Deactivate KL and alignment loss", default=False)
     parser.add_argument(
         "--train_data_path",
         type=str,
@@ -263,7 +267,7 @@ if __name__ == "__main__":
         depth=6,
         heads=8,
         mlp_dim=512,
-        num_position=args.num_position, #512
+        num_position=args.num_position,
     )
     reorganization_module = torch.nn.DataParallel(reorganization_module) 
     reorganization_module = reorganization_module.to(device) 
@@ -406,6 +410,7 @@ if __name__ == "__main__":
                                 num_batches,
                                 args.gc,
                                 args.deactivate_KL,
+                                args.base,
                             )
 
                         #------------Validation Step------------

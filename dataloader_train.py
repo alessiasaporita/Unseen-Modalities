@@ -284,6 +284,58 @@ class EPICKitchensTrain(Dataset):
 
         return action_label
 
+    def get_value_by_index(self, index):
+        datum = self.data[index]
+        action_label = self.get_label(datum)
+        available_modalities = self.sample_dict[datum[0]] #audio/rgb--> modality of the sample
+        output_data = {"Audio": None, "RGB": None}
+        
+        #------------Audio------------
+        if "Audio" in available_modalities:
+            output_data["Audio"] = self.get_fbank(datum)
+            audio_mask = np.ones((self.num_position, 1))
+            audio_pseudo_path = "/work/tesi_asaporita/UnseenModalities/audio/audio_pseudo/" + datum[0] + ".npy"
+            if not os.path.exists(audio_pseudo_path): 
+                print("Error: audio_pseudo {} doesn't exist".format(audio_pseudo_path))
+                audio_pseudo = torch.zeros((3806,))
+            else:
+                audio_pseudo = torch.Tensor(np.load(audio_pseudo_path))
+                audio_pseudo = torch.mean(audio_pseudo[-10:], dim=0)
+        else:
+            output_data["Audio"] = torch.rand(128, 128)  
+            audio_mask = np.zeros((self.num_position, 1)) #(512, 1)
+            audio_pseudo = torch.zeros((3806,))
+
+        #------------RGB------------
+        if "RGB" in available_modalities:
+            output_data["RGB"] = self.get_rgb_frames(datum) #(3, 32, 224, 224)
+            rgb_mask = np.ones((self.num_position, 1))
+            rgs_preudo_path = "/work/tesi_asaporita/UnseenModalities/rgb_pseudo/" + datum[0] + ".npy"
+            if not os.path.exists(rgs_preudo_path): 
+                print("Error: rgb_pseudo {} doesn't exist".format(rgs_preudo_path))
+                rgb_pseudo = torch.zeros((3806, ))
+            else:
+                rgb_pseudo = torch.Tensor(np.load(rgs_preudo_path))
+                rgb_pseudo = torch.mean(rgb_pseudo[-10:], dim=0)
+        else:
+            output_data["RGB"] = torch.rand(3, self.num_frames, 224, 224) #(3, 32, 224, 224)
+            rgb_mask = np.zeros((self.num_position, 1))
+            rgb_pseudo = torch.zeros((3806, ))
+        
+        masks = {
+            "RGB": rgb_mask.astype(np.float32),
+            "Audio": audio_mask.astype(np.float32),
+        }
+
+        return (
+            output_data,
+            action_label, #label
+            masks,
+            audio_pseudo,
+            rgb_pseudo,
+            datum[0], #key=name of the sample
+        )
+
     def __getitem__(self, index):
         datum = self.data[index]
         action_label = self.get_label(datum)
@@ -294,7 +346,7 @@ class EPICKitchensTrain(Dataset):
         if "Audio" in available_modalities:
             output_data["Audio"] = self.get_fbank(datum)
             audio_mask = np.ones((self.num_position, 1))
-            audio_pseudo_path = "/work/tesi_asaporita/UnseenModalities/audio3/audio_pseudo/" + datum[0] + ".npy"
+            audio_pseudo_path = "/work/tesi_asaporita/UnseenModalities/audio/audio_pseudo/" + datum[0] + ".npy"
             if not os.path.exists(audio_pseudo_path): 
                 print("Error: audio_pseudo {} doesn't exist".format(audio_pseudo_path))
                 audio_pseudo = torch.zeros((3806,))
@@ -310,7 +362,7 @@ class EPICKitchensTrain(Dataset):
         if "RGB" in available_modalities:
             output_data["RGB"] = self.get_rgb_frames(datum) #(3, 32, 224, 224)
             rgb_mask = np.ones((self.num_position, 1))
-            rgs_preudo_path = "/work/tesi_asaporita/UnseenModalities/rgb_pseudo/" + datum[0] + ".npy"
+            rgs_preudo_path = "/work/tesi_asaporita/UnseenModalities/rgb/rgb_pseudo/" + datum[0] + ".npy"
 
             if not os.path.exists(rgs_preudo_path): 
                 print("Error: rgb_pseudo {} doesn't exist".format(rgs_preudo_path))

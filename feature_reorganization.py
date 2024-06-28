@@ -136,6 +136,7 @@ class ViTReorganization(nn.Module): #dim=256, depth=6, heads=8, mlp_dim=512, num
             'Audio': self.audio_head,
         }
         #fc_layer implemented by us
+        
         self.audio_proj = nn.Sequential(
             nn.LayerNorm(768), 
             nn.Linear(768, dim),
@@ -146,7 +147,6 @@ class ViTReorganization(nn.Module): #dim=256, depth=6, heads=8, mlp_dim=512, num
             nn.Linear(768, dim),
             nn.LayerNorm(dim)
         ) 
-
 
     #reorganization --> (B, 768, 784) * (B, 784, 512) -> (B, 768, 512)
     def reorganization(self, feature, position):
