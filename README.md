@@ -27,8 +27,6 @@ We create the webdatset by `create_webdatset.py`.
 
 * Commands for all experiments / models can be found in the file `bash.sh`.
 
-<<<<<<< HEAD
-* Commands for all experiments / models can be found in the file `bash.sh`.
 
-=======
->>>>>>> ed5cc2a4a34284ad60aa50e5550aa5cffe488710
+
+
