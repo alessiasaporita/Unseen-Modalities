@@ -18,7 +18,7 @@ This is the code for the video classification task using EPIC-Kitchens, with RGB
 We download the RGB and optical flow frames from the official website of [EPIC-Kitchens](https://epic-kitchens.github.io/2023), and extract the audio files ourselves from the videos by `extract_audio.py`. 
 
 ### Web dataset
-We create the webdatset by `webdatset.py`, 
+We create the webdatset by `create_webdatset.py`, 
 ### Run Demo
 
 * We provide the splits for training, validation and testing in the `epic-annotations` folder. 
