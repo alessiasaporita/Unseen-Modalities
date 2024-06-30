@@ -1,5 +1,4 @@
 ## [Reproducing Unseen Modality Interaction for video classification](https://arxiv.org/abs/2306.12795) (NeurIPS 2023)
-## [Reproducing Unseen Modality Interaction for video classification](https://arxiv.org/abs/2306.12795) (NeurIPS 2023)
 
 
 <img width="1595" alt="Screenshot 2024-01-22 at 16 38 34" src="https://github.com/xiaobai1217/Unseen-Modality-Interaction/assets/22721775/ecc432fb-722d-41bc-befc-4add1a5abb5d">
