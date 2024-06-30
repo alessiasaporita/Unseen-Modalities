@@ -24,7 +24,11 @@ We create the webdatset by `create_webdatset.py`.
 * To run the code: 
 `python train_web.py --lr 1e-4 --batch_size 96 --num_epochs 120 --save_name _KL_ --workers 16` 
 
-* Commands for all experiments / models can be found in the file `bash.sh`.
 
 * Commands for all experiments / models can be found in the file `bash.sh`.
 
+<<<<<<< HEAD
+* Commands for all experiments / models can be found in the file `bash.sh`.
+
+=======
+>>>>>>> ed5cc2a4a34284ad60aa50e5550aa5cffe488710
