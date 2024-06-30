@@ -65,7 +65,7 @@ if __name__ == "__main__":
     )
     audio_model = audio_model.to(device)
     audio_model = nn.DataParallel(audio_model)
-    checkpoint = torch.load("/work/tesi_asaporita/UnseenModalities/audio/checkpoints/audio7.pt")
+    checkpoint = torch.load("/work/tesi_asaporita/checkpoint/EK/audio/checkpoints/audio7.pt")
     audio_model.load_state_dict(checkpoint["model"])
     audio_model.eval()
 
@@ -75,7 +75,7 @@ if __name__ == "__main__":
     )
     rgb_model.multimodal_model = False
     rgb_model = torch.nn.DataParallel(rgb_model)
-    checkpoint = torch.load("/work/tesi_asaporita/UnseenModalities/rgb/checkpoints/best_unimodal_rgb73.pt")
+    checkpoint = torch.load("/work/tesi_asaporita/checkpoint/EK/rgb/checkpoints/best_unimodal_rgb73.pt")
     rgb_model.load_state_dict(checkpoint['model'])
     rgb_model = rgb_model.to(device)
     rgb_model.eval()

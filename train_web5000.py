@@ -170,13 +170,13 @@ if __name__ == "__main__":
         "--train_data_path",
         type=str,
         help="path to train data",
-        default="/work/tesi_asaporita/UnseenModalities/webdataset/epic_kitchens-training-{000..020}.tar",
+        default="/work/tesi_asaporita/webdataset/epic_kitchens-training-{000..020}.tar",
     )
     parser.add_argument(
         "--val_data_path",
         type=str,
         help="path to validation data",
-        default="/work/tesi_asaporita/UnseenModalities/webdataset/epic_kitchens-validation-{000..004}.tar",
+        default="/work/tesi_asaporita/webdataset/epic_kitchens-validation-{000..004}.tar",
     )
     parser.add_argument(
         "--n_train_samples", type=int, help="number of training samples", default=62297,
@@ -235,7 +235,7 @@ if __name__ == "__main__":
     device = "cuda"  # or 'cpu'
     device = torch.device(device)
 
-    base_path = "/work/tesi_asaporita/UnseenModalities/checkpoints/"
+    base_path = "/work/tesi_asaporita/checkpoint/EK/"
     if not os.path.exists(base_path):
         os.mkdir(base_path)
 

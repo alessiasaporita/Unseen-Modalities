@@ -60,7 +60,7 @@ if __name__ == '__main__':
     shard_end = shard_start + args.job_size
     split = args.split
 
-    pattern = '/work/tesi_asaporita/UnseenModalities/webdataset/epic_kitchens-' + split + '-%03d.tar' % args.job_idx
+    pattern = '/work/tesi_asaporita/webdataset/epic_kitchens-' + split + '-%03d.tar' % args.job_idx
     num_position = 512
     target_length=128
     train_audio_configs, val_audio_configs = get_audio_configs(

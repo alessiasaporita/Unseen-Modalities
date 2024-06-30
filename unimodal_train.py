@@ -27,7 +27,7 @@ def save_pseudo_labels(outputs, keys, modality):
     for i in range(len(keys)): 
         #------------RGB------------
         if modality=='rgb': #RGB 
-            save_path = "/work/tesi_asaporita/UnseenModalities/rgb/rgb_pseudo/{}.npy".format(keys[i])
+            save_path = "/work/tesi_asaporita/checkpoint/EK/rgb/rgb_pseudo/{}.npy".format(keys[i])
             if os.path.exists(save_path): #predictions for i-th sample 
                 rgb_pseudo = np.load(save_path)
                 if rgb_pseudo.shape[0]>=40:
@@ -35,10 +35,10 @@ def save_pseudo_labels(outputs, keys, modality):
                 rgb_pseudo = np.concatenate((rgb_pseudo, detached_outputs[i].unsqueeze(0).numpy()))
             else:
                 rgb_pseudo=detached_outputs[i].unsqueeze(0).numpy()
-            np.save("/work/tesi_asaporita/UnseenModalities/rgb/rgb_pseudo/{}.npy".format(keys[i]), rgb_pseudo)
+            np.save("/work/tesi_asaporita/checkpoint/EK/rgb/rgb_pseudo/{}.npy".format(keys[i]), rgb_pseudo)
         #------------Audio------------
         else: #Audio 
-            save_path = "/work/tesi_asaporita/UnseenModalities/audio/audio_pseudo/{}.npy".format(keys[i])
+            save_path = "/work/tesi_asaporita/checkpoint/EK/audio/audio_pseudo/{}.npy".format(keys[i])
             if os.path.exists(save_path):
                 audio_pseudo = np.load(save_path)
                 if audio_pseudo.shape[0]>=40:
@@ -46,7 +46,7 @@ def save_pseudo_labels(outputs, keys, modality):
                 audio_pseudo = np.concatenate((audio_pseudo, detached_outputs[i].unsqueeze(0).numpy()))
             else:
                 audio_pseudo=detached_outputs[i].unsqueeze(0).numpy()
-            np.save("/work/tesi_asaporita/UnseenModalities/audio/audio_pseudo/{}.npy".format(keys[i]), audio_pseudo)
+            np.save("/work/tesi_asaporita/checkpoint/EK/audio/audio_pseudo/{}.npy".format(keys[i]), audio_pseudo)
 
 class LabelSmoothLoss(nn.Module):
     def __init__(self, smoothing=0.0):
@@ -177,7 +177,7 @@ if __name__ == "__main__":
     device = "cuda"  # or 'cpu'
     device = torch.device(device)
 
-    base_path = "/work/tesi_asaporita/UnseenModalities/checkpoints/"
+    base_path = "/work/tesi_asaporita/checkpoint/EK/"
     if not os.path.exists(base_path):
         os.mkdir(base_path)
 
