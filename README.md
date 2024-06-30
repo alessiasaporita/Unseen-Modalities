@@ -8,19 +8,17 @@ This is the code for the video classification task using EPIC-Kitchens, with RGB
 
 ### Environment
 * Python 3.8.5
-* torch 1.12.1+cu113
-* torchaudio 0.12.1+cu113
-* torchvision 0.13.1+cu113
-* mmcv-full 1.7.0
+* torch 1.8.1+cu111
+* torchaudio 0.8.1
+* torchvision 0.9.1+cu111
 
 ### Dataset
-
 We download the RGB and optical flow frames from the official website of [EPIC-Kitchens](https://epic-kitchens.github.io/2023), and extract the audio files ourselves from the videos by `extract_audio.py`. 
 
 ### Web dataset
-We create the webdatset by `create_webdatset.py`, 
-### Run Demo
+We create the webdatset by `create_webdatset.py`.
 
+### Run Demo
 * We provide the splits for training, validation and testing in the `epic-annotations` folder. 
 
 * To run the code:
